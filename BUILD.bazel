@@ -24,6 +24,16 @@ cc_library(
     hdrs = bigtable_emulator_common_hdrs,
     deps = [
         "@google_cloud_cpp//google/cloud/bigtable:google_cloud_cpp_bigtable",
+        "@rocksdb//:rocksdb"
+    ],
+)
+
+cc_library(
+    name = "storage_engine",
+    srcs = ["storage_engine.cc"],
+    hdrs = ["storage_engine.h"],
+    deps = [
+        "@rocksdb//:rocksdb"
     ],
 )
 
@@ -31,6 +41,7 @@ cc_binary(
     name = "emulator",
     srcs = bigtable_emulator_programs,
     deps = [
+        ":storage_engine",
         ":bigtable_emulator_common",
         "@com_github_grpc_grpc//:grpc",
         "@com_github_grpc_grpc//:grpc++",

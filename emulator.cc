@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include "storage_engine.h"
 
 ABSL_FLAG(std::string, host, "localhost",
           "the address to bind to on the local machine");
@@ -41,6 +42,27 @@ int main(int argc, char* argv[]) {
               << std::endl;
     return 1;
   }
+
+  // --- START OF TEST CODE ---
+  std::cout << "--- Starting RocksDB Test ---" << std::endl;
+  
+  // 1. Initialize the engine (creates ./test_db folder)
+  StorageEngine engine("test_db");
+
+  // 2. Write a test row
+  std::string key = "test-row-key";
+  std::string value = "Hello, RocksDB!";
+  if (engine.PutRow(key, value)) {
+      std::cout << "Successfully wrote row: " << key << std::endl;
+  } else {
+      std::cerr << "Failed to write row!" << std::endl;
+  }
+
+  // 3. Read the row back
+  std::string result = engine.GetRow(key);
+  std::cout << "Read back value: " << result << std::endl;
+  std::cout << "--- End of RocksDB Test ---" << std::endl;
+  // --- END OF TEST CODE ---
 
   auto& server = maybe_server.value();
 
