@@ -67,3 +67,6 @@ Jest w commicie:
 - trzeba pozmieniać/pododawać rzeczy do .bazelrc, MODULE.bazel, BUILD.bazel
 - oraz w emulator.cc, bo to jest entry point tego projektu i tutaj używamy tego POC kodu
 - POC kod korzystający z RocksDB jest w plikach storage_engine.cc i storage_engine.h
+
+# Dodawanie headerów
+- dodajemy do bigtable_emulator_common.bzl nazwę headera i src tak jak storage.h

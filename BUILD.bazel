@@ -28,20 +28,10 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "storage",
-    srcs = ["storage.cc"],
-    hdrs = ["storage.h"],
-    deps = [
-        "@rocksdb//:rocksdb"
-    ],
-)
-
 cc_binary(
     name = "emulator",
     srcs = bigtable_emulator_programs,
     deps = [
-        ":storage",
         ":bigtable_emulator_common",
         "@com_github_grpc_grpc//:grpc",
         "@com_github_grpc_grpc//:grpc++",
