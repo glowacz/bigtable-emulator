@@ -54,6 +54,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include "storage.h"
 
 namespace google {
 namespace cloud {
@@ -129,6 +130,15 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
     return UnimplementedError(
         "`automated_backup_policy` not empty.",
         GCP_ERROR_INFO().WithMetadata("schema", schema_.DebugString()));
+  }
+
+  Storage storage("test_db");
+  std::string key = "/sys/tables/" + schema_.name();
+  std::string value = schema_.SerializeAsString();
+  if (storage.PutRow(key, value)) {
+      std::cout << "Successfully wrote row: " << key << std::endl;
+  } else {
+      std::cerr << "Failed to write row!" << std::endl;
   }
 
   for (auto const& column_family_def : schema_.column_families()) {
