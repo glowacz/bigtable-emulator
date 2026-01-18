@@ -5,9 +5,15 @@ bazel build //...
 (do tego być może musisz zainstalować inną wersję:
 sudo apt update && sudo apt install bazel-7.6.1)
 
-# Skakanie po kodzie
+# VS Code Setup
+- Skakanie po kodzie
+- Błędy include'ów (żeby nie podkreślało)
+- jak podkreśla nowo dodaną rzecz, to ponownie wygenerować compile_commands.json
+
+### aby uzyskać (świeże) compile_commands.json
 bazel run --config=compile-commands
 
+### podpięcie tego compile_commands.json w VS Code
 Ctrl+Shift+P ; wpisz C/C++: Edit Configurations (UI) ; scroll na dół ;
 click Advanced Settings ; scroll tak do połowy ;
 W compile commands wpisz ścieżkę do tego pliku, np
@@ -41,6 +47,8 @@ gcloud components update # mi pisało, że coś tam jest wyłączone, ale dało 
 gcloud components install cbt # tak samo
 
 # Wysyłanie requestów do aplikacji
+
+### Za każdym otwarciem terminala, z którego chcemy wysyłać requesty
 export BIGTABLE_EMULATOR_HOST=localhost:8888
 
 Można wysyłać komendy cbt, na przykład
