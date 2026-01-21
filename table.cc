@@ -54,7 +54,49 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <atomic>
+#include <sstream>
 #include "storage.h"
+
+static const std::string kTablesPrefix = "/sys/tables/";
+static const std::string kManifestKey = "/sys/tables/_manifest";
+
+void store_schema(const google::bigtable::admin::v2::Table& schema) {
+  Storage* storage = GetGlobalStorage();
+  std::string table_key;
+  table_key = kTablesPrefix + schema.name();
+  std::string value = schema.SerializeAsString();
+
+  std::string manifest = storage->GetRow(kManifestKey);
+  bool present = false;
+  if (!manifest.empty()) {
+    std::istringstream iss(manifest);
+    std::string line;
+    while (std::getline(iss, line)) {
+      if (Trim(line) == table_key) {
+        present = true;
+        break;
+      }
+    }
+  }
+
+  std::vector<std::pair<std::string, std::string>> batch;
+  batch.emplace_back(table_key, value);
+
+  if (!present) {
+    std::string new_manifest = manifest;
+    if (!new_manifest.empty() && new_manifest.back() != '\n') new_manifest.push_back('\n');
+    new_manifest += table_key;
+    new_manifest.push_back('\n');
+    batch.emplace_back(kManifestKey, new_manifest);
+  }
+
+  if (!storage->PutBatch(batch)) {
+    std::cerr << "Failed to persist schema for key: " << table_key << std::endl;
+  } else {
+    std::cout << "Persisted schema: " << table_key << std::endl;
+  }
+}
 
 namespace google {
 namespace cloud {
@@ -96,7 +138,6 @@ StatusOr<std::shared_ptr<Table>> Table::Create(
   }
 
   res->StartGCThreadOnce();
-
   return res;
 }
 
@@ -131,16 +172,7 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
         "`automated_backup_policy` not empty.",
         GCP_ERROR_INFO().WithMetadata("schema", schema_.DebugString()));
   }
-
-  Storage storage("test_db");
-  std::string key = "/sys/tables/" + schema_.name();
-  std::string value = schema_.SerializeAsString();
-  if (storage.PutRow(key, value)) {
-      std::cout << "Successfully wrote row: " << key << std::endl;
-  } else {
-      std::cerr << "Failed to write row!" << std::endl;
-  }
-
+  store_schema(schema_);
   for (auto const& column_family_def : schema_.column_families()) {
     absl::optional<google::bigtable::admin::v2::Type> opt_value_type =
         absl::nullopt;
@@ -309,6 +341,7 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
   // Defer destroying potentially large objects to after releasing the lock.
   column_families_.swap(new_column_families);
   schema_ = new_schema;
+  store_schema(schema_);
   lock.unlock();
   return new_schema;
 }
@@ -347,9 +380,10 @@ Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
   std::lock_guard<std::mutex> lock(mu_);
   FieldMaskUtil::MergeMessageTo(new_schema, to_update,
                                 FieldMaskUtil::MergeOptions(), &schema_);
+  store_schema(schema_);
   return Status();
 }
-
+// no effect on rocksdb
 template <typename MESSAGE>
 StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
     MESSAGE const& message) const {
@@ -361,7 +395,7 @@ StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
   }
   return std::ref(*column_family_it->second);
 }
-
+// will have to change row in rocksdb
 Status Table::MutateRow(google::bigtable::v2::MutateRowRequest const& request) {
   std::lock_guard<std::mutex> lock(mu_);
 

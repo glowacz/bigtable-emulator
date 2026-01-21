@@ -41,6 +41,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "storage.h"
 
 namespace google {
 namespace cloud {

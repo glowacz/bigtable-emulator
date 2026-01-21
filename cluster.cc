@@ -187,6 +187,25 @@ StatusOr<std::shared_ptr<Table>> Cluster::FindTable(
   }
 }
 
+Status Cluster::AttachTable(std::string const& table_name,
+                            std::shared_ptr<Table> table) {
+  if (!table) {
+    return google::cloud::internal::InvalidArgumentError(
+        "null table pointer",
+        GCP_ERROR_INFO().WithMetadata("table_name", table_name));
+  }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!table_by_name_.emplace(table_name, std::move(table)).second) {
+      return google::cloud::internal::AlreadyExistsError(
+          "Table already exists.",
+          GCP_ERROR_INFO().WithMetadata("table_name", table_name));
+    }
+  }
+  return Status();
+}
+
+
 }  // namespace emulator
 }  // namespace bigtable
 }  // namespace cloud
