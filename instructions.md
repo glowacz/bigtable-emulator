@@ -53,14 +53,27 @@ export BIGTABLE_EMULATOR_HOST=localhost:8888
 
 Można wysyłać komendy cbt, na przykład
 
-### write
+### create
 cbt -project=p -instance=i createtable persistent-table
 cbt -project=p -instance=i createfamily persistent-table cf
+
+### set GC policy
+cbt -project=p -instance=i setgcpolicy persistent-table cf maxversions=2
+// dodanie na końcu force spowoduje, że policy zostanie na pewno i natychmiast zastosowana, nawet jeśli mieliśmy więcej wersji
+// bez force trzeba trochę poczekać aż się uruchomi GC, a jeśli dajemy bardziej restrykcyjną policy niż była to może wgl nie zadziałać
+
+### write
 cbt -project=p -instance=i set persistent-table row1 cf:col1=saved_data
 
 ### read
 cbt -project=p -instance=i read persistent-table
 
+
+### delete table (and its cfs)
+cbt -project=p -instance=i deletetable persistent-table
+
+### others
+cbt --help
 
 # Korzystanie z RocksDB
 Jest w commicie: 
