@@ -1181,14 +1181,27 @@ Status RowTransaction::SetCell(
     return maybe_column_family.status();
   }
 
+  
   auto& column_family = maybe_column_family->get();
-
+  
   auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::microseconds(set_cell.timestamp_micros()));
+    std::chrono::microseconds(set_cell.timestamp_micros()));
+    
+    if (timestamp_override.has_value()) {
+      timestamp = timestamp_override.value();
+    }
+    
+    // ROCKSDB 
+    // set_cell.family_name();
+    // row_key_;
+    // set_cell.column_qualifier();
+    // timestamp;
+    // set_cell.value();
 
-  if (timestamp_override.has_value()) {
-    timestamp = timestamp_override.value();
-  }
+    Storage *storage = GetGlobalStorage();
+    storage->PutCell(row_key_, set_cell.family_name(), 
+                     set_cell.column_qualifier(), timestamp, 
+                     set_cell.value());
 
   auto maybe_old_value = column_family.SetCell(
       row_key_, set_cell.column_qualifier(), timestamp, set_cell.value());

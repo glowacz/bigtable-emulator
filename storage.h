@@ -8,6 +8,10 @@ public:
     Storage(const std::string& db_path);
     ~Storage();
 
+    bool PutCell(const std::string& row_key, const std::string& column_family,
+        const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
+        const std::string& value);
+        
     // Basic abstraction for Bigtable "MutateRow"
     bool PutRow(const std::string& row_key, const std::string& value);
     std::string GetRow(const std::string& row_key);
@@ -15,6 +19,10 @@ public:
 
     // Atomic write of several key/value pairs.
     bool PutBatch(const std::vector<std::pair<std::string, std::string>>& kvs);
+    
+    // vibe coded
+    void ScanDatabase(void);
+    void GetRowData(const std::string& row_key);
 
 private:
     std::unique_ptr<rocksdb::DB> db_;

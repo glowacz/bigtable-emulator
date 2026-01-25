@@ -50,12 +50,15 @@ std::string const kStrippedValue;
 
 void CellStream::Next(NextMode mode) {
   if (impl_->Next(mode)) {
+    std::cout << "mode default\n";
     return;
   }
   if (mode == NextMode::kColumn) {
+    std::cout << "mode kColumn\n";
     EmulateNextColumn();
     return;
   }
+  std::cout << "mode kRow\n";
   assert(mode == NextMode::kRow);
   EmulateNextRow();
 }
@@ -226,7 +229,9 @@ class TrivialTransformer : public AbstractCellStreamImpl {
   }
 
   bool Next(NextMode mode) override {
+    std::cout << "hello BEFORE next in in impl\n";
     source_.Next(mode);
+    std::cout << "hello after next in in impl\n";
     transformed_.reset();
     return true;
   }

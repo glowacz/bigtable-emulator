@@ -23,6 +23,8 @@
 #include "cell_view.h"
 #include "filter.h"
 #include "filtered_map.h"
+#include "storage.h"
+
 #include <google/bigtable/admin/v2/table.pb.h>
 #include <google/bigtable/admin/v2/types.pb.h>
 #include <google/bigtable/v2/data.pb.h>
@@ -233,6 +235,10 @@ absl::optional<std::string> ColumnRow::SetCell(
   if (!(cell_it == cells_.end())) {
     ret = std::move(cell_it->second);
   }
+
+  // TODO: ROCKSDB HERE
+  Storage* storage = GetGlobalStorage();
+  
 
   cells_[timestamp] = value;
 
@@ -464,7 +470,7 @@ void ColumnFamilyRow::RunGC(
 absl::optional<std::string> ColumnFamily::SetCell(
     std::string const& row_key, std::string const& column_qualifier,
     std::chrono::milliseconds timestamp, std::string const& value) {
-  return rows_[row_key].SetCell(column_qualifier, timestamp, value);
+      return rows_[row_key].SetCell(column_qualifier, timestamp, value);
 }
 
 StatusOr<absl::optional<std::string>> ColumnFamily::UpdateCell(
@@ -614,6 +620,7 @@ CellView const& FilteredColumnFamilyStream::Value() const {
 }
 
 bool FilteredColumnFamilyStream::Next(NextMode mode) {
+  std::cout << "FilteredColumnFamilyStream::Next\n";
   InitializeIfNeeded();
   cur_value_.reset();
   assert(*row_it_ != rows_.end());

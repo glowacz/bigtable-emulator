@@ -49,50 +49,53 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Failed to open DB\n");
     return 1;
   }
-Storage *storage = GetGlobalStorage();
-auto& server = maybe_server.value();
-// Read manifest
-std::string manifest = storage->GetRow("/sys/tables/_manifest");
-if (!manifest.empty()) {
-  std::istringstream iss(manifest);
-  std::string table_key;
-  while (std::getline(iss, table_key)) {
-    table_key = Trim(table_key);
-    if (table_key.empty()) continue;
-    std::string proto_blob = storage->GetRow(table_key);
-    if (proto_blob.empty()) {
-      std::cerr << "Warning: manifest references key with empty value: " << table_key << std::endl;
-      continue;
-    }
-    google::bigtable::admin::v2::Table schema;
-    if (!schema.ParseFromString(proto_blob)) {
-      std::cerr << "Failed to parse Table proto from storage key: " << table_key << std::endl;
-      continue;
-    }
+  Storage *storage = GetGlobalStorage();
+  auto& server = maybe_server.value();
+  // Read manifest
+  std::string manifest = storage->GetRow("/sys/tables/_manifest");
+  if (!manifest.empty()) {
+    std::istringstream iss(manifest);
+    std::string table_key;
+    while (std::getline(iss, table_key)) {
+      table_key = Trim(table_key);
+      if (table_key.empty()) continue;
+      std::string proto_blob = storage->GetRow(table_key);
+      if (proto_blob.empty()) {
+        std::cerr << "Warning: manifest references key with empty value: " << table_key << std::endl;
+        continue;
+      }
+      google::bigtable::admin::v2::Table schema;
+      if (!schema.ParseFromString(proto_blob)) {
+        std::cerr << "Failed to parse Table proto from storage key: " << table_key << std::endl;
+        continue;
+      }
 
-    // Create runtime Table object from the persisted schema
-    auto maybe_table = google::cloud::bigtable::emulator::Table::Create(schema);
-    if (!maybe_table) {
-      std::cerr << "Table::Create failed for persisted schema: " << schema.DebugString()
-                << " error: " << maybe_table.status() << std::endl;
-      continue;
-    }
+      // Create runtime Table object from the persisted schema
+      auto maybe_table = google::cloud::bigtable::emulator::Table::Create(schema);
+      if (!maybe_table) {
+        std::cerr << "Table::Create failed for persisted schema: " << schema.DebugString()
+                  << " error: " << maybe_table.status() << std::endl;
+        continue;
+      }
 
-    auto cluster_ptr = server->cluster();
-    if (!cluster_ptr) {
-      std::cerr << "Server returned null cluster pointer" << std::endl;
-      continue;
-    }
-    auto attach_status = cluster_ptr->AttachTable(schema.name(), maybe_table.value());
-    if (!attach_status.ok()) {
-      std::cerr << "Failed to attach persisted table into cluster: "
-                << attach_status << " name=" << schema.name() << std::endl;
-      continue;
-    }
-    std::cout << "Loaded persisted table: " << schema.name() << std::endl;
+      auto cluster_ptr = server->cluster();
+      if (!cluster_ptr) {
+        std::cerr << "Server returned null cluster pointer" << std::endl;
+        continue;
+      }
+      auto attach_status = cluster_ptr->AttachTable(schema.name(), maybe_table.value());
+      if (!attach_status.ok()) {
+        std::cerr << "Failed to attach persisted table into cluster: "
+                  << attach_status << " name=" << schema.name() << std::endl;
+        continue;
+      }
+      std::cout << "Loaded persisted table: " << schema.name() << std::endl;
 
+    }
   }
- }
+
+  storage->ScanDatabase();
+  // storage->GetRowData("row1");
 
   std::cout << "Server running on port " << server->bound_port() << "\n";
   server->Wait();

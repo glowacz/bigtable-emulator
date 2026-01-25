@@ -1,4 +1,5 @@
 #include "storage.h"
+#include "rocksdb/iterator.h"
 #include <iostream>
 
 Storage::Storage(const std::string& db_path) {
@@ -18,6 +19,14 @@ Storage::Storage(const std::string& db_path) {
 
 Storage::~Storage() {
     // db_ is a unique_ptr, so it will close automatically
+}
+
+bool Storage::PutCell(const std::string& row_key, const std::string& column_family,
+      const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
+      const std::string& value) {
+    std::string full_key = row_key + ":" + column_family + ":" + column_qualifier + ":" + std::to_string(timestamp.count());
+    rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), full_key, value);
+    return status.ok();
 }
 
 bool Storage::PutRow(const std::string& row_key, const std::string& value) {
@@ -50,6 +59,75 @@ bool Storage::PutBatch(const std::vector<std::pair<std::string,std::string>>& kv
         return false;
     }
     return true;
+}
+
+void Storage::ScanDatabase(void) {
+  // 1. Create a ReadOptions object
+  rocksdb::ReadOptions read_options;
+  // Optional: Setting 'tailing' to true can be useful for keeping the iterator open 
+  // while data changes, but for a static snapshot, leave as default.
+  
+  // 2. Create the iterator
+  // Note: The caller is responsible for deleting the iterator
+  rocksdb::Iterator* it = db_->NewIterator(read_options);
+
+  // 3. Loop through the database
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      std::string key = it->key().ToString();
+      std::string value = it->value().ToString();
+
+      std::cout << "Key: " << key << " | Value: " << value << std::endl;
+  }
+
+  // 4. Check for errors during iteration
+  if (!it->status().ok()) {
+      std::cerr << "An error occurred: " << it->status().ToString() << std::endl;
+  }
+
+  // 5. Clean up
+  delete it;
+}
+
+struct RowRecord {
+  std::string full_key;
+  std::string value;
+};
+
+void Storage::GetRowData(const std::string& row_key) {
+  std::vector<RowRecord> results;
+  
+  // 1. Construct the distinct prefix (e.g., "row1:")
+  // This ensures we don't accidentally fetch "row10" when looking for "row1"
+  std::string prefix = row_key + ":";
+
+  rocksdb::ReadOptions read_options;
+  // Optional: read_options.fill_cache = false; // logic dependent
+
+  rocksdb::Iterator* it = db_->NewIterator(read_options);
+
+  // 2. Seek directly to the first key starting with "row1:"
+  for (it->Seek(prefix); it->Valid(); it->Next()) {
+      
+      // 3. Check if we have stepped past the row we care about
+      // The moment the key does not start with "row1:", we stop.
+      if (!it->key().starts_with(prefix)) {
+          break;
+      }
+
+      // 4. Capture the data
+      std::string key = it->key().ToString();
+      std::string value = it->value().ToString();
+      std::cout << "Key: " << key << " | Value: " << value << std::endl;
+      
+      results.push_back({it->key().ToString(), it->value().ToString()});
+  }
+
+  // 5. Always check status after iteration
+  if (!it->status().ok()) {
+      std::cerr << "Error during scan: " << it->status().ToString() << std::endl;
+  }
+
+  delete it;
 }
 
 static Storage *g_storage = NULL;
