@@ -68,6 +68,14 @@ cbt -project=p -instance=i set persistent-table row1 cf:col1=saved_data
 ### read
 cbt -project=p -instance=i read persistent-table
 
+// tylko wybrane wiersze
+cbt -project=p -instance=i read persistent-table regex='row1|row3'
+
+// tylko 1 wiersz
+cbt -project=p -instance=i lookup persistent-table row1
+
+cbt -project=p -instance=i lookup persistent-table row1 columns=cf:col1
+
 
 ### delete table (and its cfs)
 cbt -project=p -instance=i deletetable persistent-table
