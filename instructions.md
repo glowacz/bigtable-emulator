@@ -91,3 +91,6 @@ Jest w commicie:
 
 # Dodawanie headerów
 - dodajemy do bigtable_emulator_common.bzl nazwę headera i src tak jak storage.h
+
+# Czyszczenie całej bazy
+`bazel run //:clear`

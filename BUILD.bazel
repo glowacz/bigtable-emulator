@@ -43,6 +43,14 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "clear",
+    srcs = ["clear_db.cc"],
+    deps = [
+        ":bigtable_emulator_common", # This provides storage.h and storage.cc
+    ],
+)
+
 gen_cc_tests(
     srcs = bigtable_emulator_unit_tests,
     deps = [
