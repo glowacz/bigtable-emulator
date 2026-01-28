@@ -8,7 +8,7 @@ public:
     Storage(const std::string& db_path);
     ~Storage();
 
-    bool PutCell(const std::string& row_key, const std::string& column_family,
+    bool PutCell(const std::string& table_name, const std::string& row_key, const std::string& column_family,
         const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
         const std::string& value);
         
@@ -22,7 +22,8 @@ public:
     
     // vibe coded
     void ScanDatabase(void);
-    void GetRowData(const std::string& row_key);
+    void GetRowData(const std::string& table_name, const std::string& row_key);
+    rocksdb::Iterator* NewIterator();
 
 private:
     std::unique_ptr<rocksdb::DB> db_;

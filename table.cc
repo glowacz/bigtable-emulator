@@ -131,6 +131,7 @@ void Table::StartGCThreadOnce() {
 
 StatusOr<std::shared_ptr<Table>> Table::Create(
     google::bigtable::admin::v2::Table schema) {
+  std::cout << "Table::Create with name " << schema.name() << "\n";
   std::shared_ptr<Table> res(new Table);
   auto status = res->Construct(std::move(schema));
   if (!status.ok()) {
@@ -146,7 +147,9 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
   // that luxury here, so we need to make sure that the changes performed in
   // this member function are reflected in other threads. The simplest way to do
   // this is the mutex.
+  std::cout << "Table::Construct()\n";
   std::lock_guard<std::mutex> lock(mu_);
+  name_ = schema.name();
   schema_ = std::move(schema);
   if (schema_.granularity() ==
       btadmin::Table::TIMESTAMP_GRANULARITY_UNSPECIFIED) {
@@ -408,6 +411,8 @@ Status Table::DoMutationsWithPossibleRollback(
     std::string const& row_key,
     google::protobuf::RepeatedPtrField<google::bigtable::v2::Mutation> const&
         mutations) {
+  std::cout << "DoMutationsWithPossibleRollback\n";
+    
   if (row_key.size() > kMaxRowLen) {
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
@@ -415,10 +420,14 @@ Status Table::DoMutationsWithPossibleRollback(
                                       absl::StrFormat("%zu", row_key.size())));
   }
 
-  RowTransaction row_transaction(this->get(), row_key);
+  std::cout << "DoMutationsWithPossibleRollback: BEFORE getting table name\n";
+  // const std::string &table_name = this->get()->GetSchema().name();
+  std::cout << "DoMutationsWithPossibleRollback: AFTER getting table name\n";  
+  RowTransaction row_transaction(this->get(), row_key, name_);
 
   for (auto const& mutation : mutations) {
     if (mutation.has_set_cell()) {
+      std::cout << "mutation has set_cell\n";
       auto const& set_cell = mutation.set_cell();
 
       absl::optional<std::chrono::milliseconds> timestamp_override =
@@ -436,6 +445,7 @@ Status Table::DoMutationsWithPossibleRollback(
                 std::chrono::system_clock::now().time_since_epoch()));
       }
 
+      std::cout << "Before SetCell\n";
       auto status = row_transaction.SetCell(set_cell, timestamp_override);
       if (!status.ok()) {
         return status;
@@ -503,15 +513,19 @@ Status Table::DoMutationsWithPossibleRollback(
 }
 // NOLINTEND(readability-function-cognitive-complexity)
 
+// ------------------------------------------------------------------------------------------------------------
+// Persistent
 StatusOr<CellStream> Table::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
   auto table_stream_ctor = [range_set = std::move(range_set), this] {
-    std::vector<std::unique_ptr<FilteredColumnFamilyStream>> per_cf_streams;
+    std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> per_cf_streams;
     per_cf_streams.reserve(column_families_.size());
     for (auto const& column_family : column_families_) {
-      per_cf_streams.emplace_back(std::make_unique<FilteredColumnFamilyStream>(
-          *column_family.second, column_family.first, range_set));
+      std::cout << "BEFORE creating PersistentFilteredColumnFamilyStream\n";
+      per_cf_streams.emplace_back(std::make_unique<PersistentFilteredColumnFamilyStream>(
+          name_, ""));
+      std::cout << "AFTER creating PersistentFilteredColumnFamilyStream\n";
     }
     return CellStream(
         std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
@@ -523,6 +537,29 @@ StatusOr<CellStream> Table::CreateCellStream(
 
   return table_stream_ctor();
 }
+
+// ------------------------------------------------------------------------------------------------------------
+// In memory
+// StatusOr<CellStream> Table::CreateCellStream(
+//   std::shared_ptr<StringRangeSet> range_set,
+//   absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
+//   auto table_stream_ctor = [range_set = std::move(range_set), this] {
+//     std::vector<std::unique_ptr<FilteredColumnFamilyStream>> per_cf_streams;
+//     per_cf_streams.reserve(column_families_.size());
+//     for (auto const& column_family : column_families_) {
+//       per_cf_streams.emplace_back(std::make_unique<FilteredColumnFamilyStream>(
+//           *column_family.second, column_family.first, range_set));
+//     }
+//     return CellStream(
+//         std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
+//   };
+
+//   if (maybe_row_filter.has_value()) {
+//     return CreateFilter(maybe_row_filter.value(), table_stream_ctor);
+//   }
+
+//   return table_stream_ctor();
+// }
 
 bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
   if (!absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
@@ -559,8 +596,22 @@ bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
   return true;
 }
 
+// ------------------------------------------------------------------------------------------------------------
+// In-memory
+// std::vector<CellStream> FilteredTableStream::CreateCellStreams(
+//   std::vector<std::unique_ptr<FilteredColumnFamilyStream>> cf_streams) {
+// std::vector<CellStream> res;
+// res.reserve(cf_streams.size());
+// for (auto& stream : cf_streams) {
+//   res.emplace_back(std::move(stream));
+// }
+// return res;
+// }
+
+// ------------------------------------------------------------------------------------------------------------
+// Persistent
 std::vector<CellStream> FilteredTableStream::CreateCellStreams(
-    std::vector<std::unique_ptr<FilteredColumnFamilyStream>> cf_streams) {
+    std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> cf_streams) {
   std::vector<CellStream> res;
   res.reserve(cf_streams.size());
   for (auto& stream : cf_streams) {
@@ -676,6 +727,7 @@ Table::CheckAndMutateRow(
 
 Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
                        RowStreamer& row_streamer) const {
+  std::cout << "ReadRows start\n";
   std::shared_ptr<StringRangeSet> row_set;
   // We need to check that, not only do we have rows, but that it is
   // not empty (i.e. at least one of row_range or rows is specified).
@@ -692,11 +744,14 @@ Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
   }
   std::lock_guard<std::mutex> lock(mu_);
 
+  std::cout << "Before creating CellStream\n";
   StatusOr<CellStream> maybe_stream;
   if (request.has_filter()) {
     maybe_stream = CreateCellStream(row_set, std::move(request.filter()));
+    std::cout << "After creating CellStream WITH filter\n";
   } else {
     maybe_stream = CreateCellStream(row_set, absl::nullopt);
+    std::cout << "After creating CellStream WITHOUT filter\n";
   }
 
   if (!maybe_stream) {
@@ -706,6 +761,7 @@ Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
   std::int64_t rows_count = 0;
   absl::optional<std::string> current_row_key;
 
+  std::cout << "Before iterating over CellStream\n";
   CellStream& stream = *maybe_stream;
   for (; stream; ++stream) {
     std::cout << "Row: " << stream->row_key()
@@ -940,6 +996,7 @@ Table::ReadModifyWriteRow(
 
   std::lock_guard<std::mutex> lock(mu_);
 
+  // TODO: table name needed here?
   RowTransaction row_transaction(this->get(), request.row_key());
 
   auto maybe_response = row_transaction.ReadModifyWriteRow(request);
@@ -1198,10 +1255,13 @@ Status RowTransaction::SetCell(
     // timestamp;
     // set_cell.value();
 
+    std::cout << "Before GetGlobalStorage\n";
     Storage *storage = GetGlobalStorage();
-    storage->PutCell(row_key_, set_cell.family_name(), 
-                     set_cell.column_qualifier(), timestamp, 
-                     set_cell.value());
+    std::cout << "Before PutCell (to Global Storage)\n";
+    std::cout << "Table name: " << table_name_ << "\n";
+    storage->PutCell(table_name_, row_key_, set_cell.family_name(), 
+                     set_cell.column_qualifier(), timestamp, set_cell.value());
+    std::cout << "After PutCell (to Global Storage)\n";
 
   auto maybe_old_value = column_family.SetCell(
       row_key_, set_cell.column_qualifier(), timestamp, set_cell.value());
