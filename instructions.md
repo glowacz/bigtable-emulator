@@ -83,6 +83,12 @@ cbt -project=p -instance=i deletetable persistent-table
 ### others
 cbt --help
 
+# Zapełnianie bazy skryptem
+// można odkomentować i zakomentować odpowiednie jego części, w zależności od potrzeb
+// np ja wykryłem, że jest problem przy wielu column families
+`chmod +x populate_db.sh`
+`./populate_db.sh`
+
 # Korzystanie z RocksDB
 Jest w commicie: 
 - trzeba pozmieniać/pododawać rzeczy do .bazelrc, MODULE.bazel, BUILD.bazel
