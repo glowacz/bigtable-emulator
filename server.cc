@@ -56,6 +56,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::ReadRowsRequest const* request,
       grpc::ServerWriter<btproto::ReadRowsResponse>* writer) override {
+    std::cout << "\nReadRows\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -68,6 +69,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::SampleRowKeysRequest const* request,
       grpc::ServerWriter<btproto::SampleRowKeysResponse>* writer) override {
+    std::cout << "\nSampleRowKeys\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -81,6 +83,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
   grpc::Status MutateRow(grpc::ServerContext* /* context */,
                          btproto::MutateRowRequest const* request,
                          btproto::MutateRowResponse* /* response */) override {
+    std::cout << "\nMutateRow\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -92,6 +95,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::MutateRowsRequest const* request,
       grpc::ServerWriter<btproto::MutateRowsResponse>* writer) override {
+    std::cout << "\nMutateRows\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -128,6 +132,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::CheckAndMutateRowRequest const* request,
       btproto::CheckAndMutateRowResponse* response) override {
+    std::cout << "\nCheckAndMutateRow\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -147,6 +152,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::PingAndWarmRequest const* /* request */,
       btproto::PingAndWarmResponse* /* response */) override {
+    std::cout << "\nPingAndWarm\n\n";
     return grpc::Status::OK;
   }
 
@@ -154,6 +160,7 @@ class EmulatorService final : public btproto::Bigtable::Service {
       grpc::ServerContext* /* context */,
       btproto::ReadModifyWriteRowRequest const* request,
       btproto::ReadModifyWriteRowResponse* response) override {
+    std::cout << "\nReadModifyWriteRow\n\n";
     auto maybe_table = cluster_->FindTable(request->table_name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -180,6 +187,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status CreateTable(grpc::ServerContext* /* context */,
                            btadmin::CreateTableRequest const* request,
                            btadmin::Table* response) override {
+    std::cout << "\nCreateTable\n\n";
     auto table_name = request->parent() + "/tables/" + request->table_id();
     auto maybe_table = cluster_->CreateTable(table_name, request->table());
     if (!maybe_table) {
@@ -192,6 +200,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status ListTables(grpc::ServerContext* /* context */,
                           btadmin::ListTablesRequest const* request,
                           btadmin::ListTablesResponse* response) override {
+    std::cout << "\nListTables\n\n";
     if (!request->page_token().empty()) {
       return ToGrpcStatus(UnimplementedError(
           "Pagination is not supported.",
@@ -222,6 +231,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status GetTable(grpc::ServerContext* /* context */,
                         btadmin::GetTableRequest const* request,
                         btadmin::Table* response) override {
+    std::cout << "\nGetTable\n\n";
     auto maybe_table = cluster_->GetTable(request->name(), request->view());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -233,6 +243,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status UpdateTable(grpc::ServerContext* /* context */,
                            btadmin::UpdateTableRequest const* request,
                            google::longrunning::Operation* response) override {
+    std::cout << "\nUpdateTable\n\n";
     auto maybe_table = cluster_->FindTable(request->table().name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -259,6 +270,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status DeleteTable(grpc::ServerContext* /* context */,
                            btadmin::DeleteTableRequest const* request,
                            google::protobuf::Empty* /* response */) override {
+    std::cout << "\nDeleteTable\n\n";
     return ToGrpcStatus(cluster_->DeleteTable(request->name()));
   }
 
@@ -266,6 +278,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
       grpc::ServerContext* /* context */,
       btadmin::ModifyColumnFamiliesRequest const* request,
       btadmin::Table* response) override {
+    std::cout << "\nModifyColumnFamilies\n\n";
     auto maybe_table = cluster_->FindTable(request->name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -282,6 +295,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
   grpc::Status DropRowRange(grpc::ServerContext* /* context */,
                             btadmin::DropRowRangeRequest const* request,
                             google::protobuf::Empty* /* response */) override {
+    std::cout << "\nDropRowRange\n\n";
     auto maybe_table = cluster_->FindTable(request->name());
     if (!maybe_table) {
       return ToGrpcStatus(maybe_table.status());
@@ -299,6 +313,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
       grpc::ServerContext* /* context */,
       btadmin::GenerateConsistencyTokenRequest const* request,
       btadmin::GenerateConsistencyTokenResponse* response) override {
+    std::cout << "\nGenerateConsistencyToken\n\n";
     if (!cluster_->HasTable(request->name())) {
       return ToGrpcStatus(NotFoundError(
           "Table does not exist.",
@@ -312,6 +327,7 @@ class EmulatorTableService final : public btadmin::BigtableTableAdmin::Service {
       grpc::ServerContext* /* context */,
       btadmin::CheckConsistencyRequest const* request,
       btadmin::CheckConsistencyResponse* response) override {
+    std::cout << "\nCheckConsistency\n\n";
     if (!cluster_->HasTable(request->name())) {
       return ToGrpcStatus(NotFoundError(
           "Table does not exist.",
