@@ -524,9 +524,10 @@ StatusOr<CellStream> Table::CreateCellStream(
     for (auto const& column_family : column_families_) {
       std::cout << "BEFORE creating PersistentFilteredColumnFamilyStream\n";
       per_cf_streams.emplace_back(std::make_unique<PersistentFilteredColumnFamilyStream>(
-          name_, ""));
+          name_, column_family.first, ""));
       std::cout << "AFTER creating PersistentFilteredColumnFamilyStream\n";
     }
+    std::cout << "JUST BEFORE CellStream for vector\n";
     return CellStream(
         std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
   };
@@ -534,6 +535,8 @@ StatusOr<CellStream> Table::CreateCellStream(
   if (maybe_row_filter.has_value()) {
     return CreateFilter(maybe_row_filter.value(), table_stream_ctor);
   }
+
+  std::cout << "Before calling lambda\n";
 
   return table_stream_ctor();
 }
@@ -612,6 +615,7 @@ bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
 // Persistent
 std::vector<CellStream> FilteredTableStream::CreateCellStreams(
     std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> cf_streams) {
+  std::cout << "============= CreateCellStreams =============\n";
   std::vector<CellStream> res;
   res.reserve(cf_streams.size());
   for (auto& stream : cf_streams) {

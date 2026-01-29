@@ -643,6 +643,7 @@ class FilteredColumnFamilyStream : public AbstractCellStreamImpl {
 class PersistentFilteredColumnFamilyStream : public AbstractCellStreamImpl {
   public:
    PersistentFilteredColumnFamilyStream(const std::string& table_name, 
+                                        const std::string& family, 
                                         const std::string& start_row_key = "");
    
    ~PersistentFilteredColumnFamilyStream() override;

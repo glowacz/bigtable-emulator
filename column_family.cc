@@ -749,10 +749,12 @@ Status CheckGCRuleIsValid(google::bigtable::admin::v2::GcRule const& rule) {
 //     std::shared_ptr<StringRangeSet const> row_set)
 //     : column_family_name_(std::move(column_family_name)),
 //       row_ranges_(std::move(row_set)) {}
-    
+
 PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
-  const std::string& table_name, const std::string& start_row_key)
-  : storage_(GetGlobalStorage()), start_row_key_(start_row_key) {
+  const std::string& table_name, const std::string& family, const std::string& start_row_key) : 
+    storage_(GetGlobalStorage()), 
+    cur_family_(family), 
+    start_row_key_(start_row_key) {
   // Define the prefix specifically for this table
   // Storage format: /tables/<table_name>/<row>/...
   table_prefix_ = "/tables/" + table_name + "/";
@@ -766,58 +768,66 @@ bool PersistentFilteredColumnFamilyStream::ApplyFilter(InternalFilter const& int
 }
 
 void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
-if (initialized_) return;
+  if (initialized_) return;
 
-it_.reset(storage_->NewIterator());
+  std::cout << "\nInitializeIfNeeded was needed for family " << cur_family_  
+            << " and table_prefix " << table_prefix_ <<"\n";
 
-std::string search_key = table_prefix_;
-if (!start_row_key_.empty()) {
-    search_key += start_row_key_;
-}
+  it_.reset(storage_->NewIterator(cur_family_));
 
-it_->Seek(search_key);
+  std::string search_key = table_prefix_;
+  if (!start_row_key_.empty()) {
+      search_key += start_row_key_;
+  }
 
-// Validate the first item
-// We cast away constness here because ParseCurrentKey updates internal buffers
-// which constitute the "logical" read state of the stream.
-const_cast<PersistentFilteredColumnFamilyStream*>(this)->has_value_ = 
-    const_cast<PersistentFilteredColumnFamilyStream*>(this)->ParseCurrentKey();
+  it_->Seek(search_key);
 
-initialized_ = true;
+  std::cout << "InitializeIfNeeded: after seek to " << search_key  << " and before ParseCurrentKey\n";
+
+  // Validate the first item
+  // We cast away constness here because ParseCurrentKey updates internal buffers
+  // which constitute the "logical" read state of the stream.
+  const_cast<PersistentFilteredColumnFamilyStream*>(this)->has_value_ = 
+      const_cast<PersistentFilteredColumnFamilyStream*>(this)->ParseCurrentKey();
+
+  initialized_ = true;
 }
 
 bool PersistentFilteredColumnFamilyStream::HasValue() const {
-InitializeIfNeeded();
-return has_value_;
+  InitializeIfNeeded();
+  return has_value_;
 }
 
 CellView const& PersistentFilteredColumnFamilyStream::Value() const {
-InitializeIfNeeded();
-if (!current_view_.has_value()) {
-    current_view_.emplace(
-        cur_row_, 
-        cur_family_, 
-        cur_qualifier_, 
-        cur_timestamp_, 
-        cur_value_
-    );
-}
-return current_view_.value();
+  // std::cout << "PersistentFilteredColumnFamilyStream::Value()\n";
+  InitializeIfNeeded();
+  if (!current_view_.has_value()) {
+      current_view_.emplace(
+          cur_row_, 
+          cur_family_, 
+          cur_qualifier_, 
+          cur_timestamp_, 
+          cur_value_
+      );
+  }
+  return current_view_.value();
 }
 
 bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
-InitializeIfNeeded();
-if (!has_value_) return false;
+  InitializeIfNeeded();
+  if (!has_value_) return false;
 
-// Invalidate current view cache
-current_view_.reset();
+  // Invalidate current view cache
+  current_view_.reset();
 
-if (mode == NextMode::kCell) {
+  if (mode == NextMode::kCell) {
+    std::cout << cur_family_  << ": PersistentFilteredColumnFamilyStream::Next | kCell\n";
     it_->Next();
     has_value_ = ParseCurrentKey();
     return true; // NextMode::kCell is always supported
-} 
-else if (mode == NextMode::kColumn) {
+  }
+  else if (mode == NextMode::kColumn) {
+    std::cout << "PersistentFilteredColumnFamilyStream::Next | kColumn\n";
     // Skip until Column Qualifier (or Family/Row) changes
     std::string old_row = cur_row_;
     std::string old_fam = cur_family_;
@@ -835,8 +845,9 @@ else if (mode == NextMode::kColumn) {
         if (cur_qualifier_ != old_qual) break;
     }
     return true;
-} 
-else { 
+  } 
+  else { 
+    std::cout << "PersistentFilteredColumnFamilyStream::Next | kRow\n";
     // Implicitly NextMode::kRow (or others that act like Row for this simplified logic)
     // Skip until Row changes
     std::string old_row = cur_row_;
@@ -849,50 +860,58 @@ else {
         if (cur_row_ != old_row) break;
     }
     return true;
-}
+  }
 }
 
 // Helper to parse the raw RocksDB key format:
 // /tables/<table_name>/<row_key>/<column_family>/<column_qualifier>/<timestamp>
 bool PersistentFilteredColumnFamilyStream::ParseCurrentKey() {
-if (!it_->Valid()) return false;
+  std::cout << "ParseCurrentKey start\n";
 
-std::string key = it_->key().ToString();
+  if (!it_->Valid()) return false;
 
-// Ensure we are still within the specific table
-if (key.rfind(table_prefix_, 0) != 0) { // starts_with check
-    return false;
-}
+  std::string key = it_->key().ToString();
 
-// Remove the prefix to parse the rest
-// Remaining: <row_key>/<column_family>/<column_qualifier>/<timestamp>
-// Note: This naive parsing assumes row_key/fam/qual do not contain '/'. 
-// This matches the provided Storage::PutCell implementation.
-std::string_view remaining(key.data() + table_prefix_.size(), key.size() - table_prefix_.size());
+  std::cout << "ParseCurrentKey key is " << key << "\n";
 
-size_t pos1 = remaining.find('/');
-if (pos1 == std::string::npos) return false;
-cur_row_ = std::string(remaining.substr(0, pos1));
+  // Ensure we are still within the specific table
+  if (key.rfind(table_prefix_, 0) != 0) { // starts_with check
+      return false;
+  }
 
-size_t pos2 = remaining.find('/', pos1 + 1);
-if (pos2 == std::string::npos) return false;
-cur_family_ = std::string(remaining.substr(pos1 + 1, pos2 - pos1 - 1));
+  // Remove the prefix to parse the rest
+  // Remaining: <row_key>/<column_family>/<column_qualifier>/<timestamp>
+  // Note: This naive parsing assumes row_key/fam/qual do not contain '/'. 
+  // This matches the provided Storage::PutCell implementation.
+  std::string_view remaining(key.data() + table_prefix_.size(), key.size() - table_prefix_.size());
 
-size_t pos3 = remaining.find('/', pos2 + 1);
-if (pos3 == std::string::npos) return false;
-cur_qualifier_ = std::string(remaining.substr(pos2 + 1, pos3 - pos2 - 1));
+  size_t pos1 = remaining.find('/');
+  if (pos1 == std::string::npos) return false;
+  cur_row_ = std::string(remaining.substr(0, pos1));
 
-std::string ts_str = std::string(remaining.substr(pos3 + 1));
-try {
-    long long ts_val = std::stoll(ts_str);
-    cur_timestamp_ = std::chrono::milliseconds(ts_val);
-} catch (...) {
-    cur_timestamp_ = std::chrono::milliseconds(0);
-}
+  // size_t pos2 = remaining.find('/', pos1 + 1);
+  // if (pos2 == std::string::npos) return false;
+  // cur_family_ = std::string(remaining.substr(pos1 + 1, pos2 - pos1 - 1));
+  size_t pos2 = pos1;
 
-cur_value_ = it_->value().ToString();
+  size_t pos3 = remaining.find('/', pos2 + 1);
+  if (pos3 == std::string::npos) return false;
+  cur_qualifier_ = std::string(remaining.substr(pos2 + 1, pos3 - pos2 - 1));
 
-return true;
+  std::string ts_str = std::string(remaining.substr(pos3 + 1));
+  try {
+      long long ts_val = std::stoll(ts_str);
+      cur_timestamp_ = std::chrono::milliseconds(ts_val);
+  } catch (...) {
+      cur_timestamp_ = std::chrono::milliseconds(0);
+  }
+
+  cur_value_ = it_->value().ToString();
+
+  std::cout << "ParseCurrentKey | " << cur_row_ << " | " << cur_family_ << " | " << cur_qualifier_ 
+  << " | " << ts_str << " | " << cur_value_ << "\n";
+
+  return true;
 }
 
 }  // namespace emulator

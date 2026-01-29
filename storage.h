@@ -1,6 +1,9 @@
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
+#include <unordered_map>
+#include <mutex>
 #include "rocksdb/db.h"
 
 class Storage {
@@ -12,21 +15,32 @@ public:
         const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
         const std::string& value);
         
-    // Basic abstraction for Bigtable "MutateRow"
+    // Basic abstraction for Bigtable "MutateRow" (Uses Default Column Family)
     bool PutRow(const std::string& row_key, const std::string& value);
     std::string GetRow(const std::string& row_key);
     bool DeleteRow(const std::string& row_key);
 
-    // Atomic write of several key/value pairs.
+    // Atomic write of several key/value pairs (Uses Default Column Family)
     bool PutBatch(const std::vector<std::pair<std::string, std::string>>& kvs);
     
-    // vibe coded
+    // Scans all Column Families and prints data
     void ScanDatabase(void);
+    
+    // Scans all Column Families for a specific row key
     void GetRowData(const std::string& table_name, const std::string& row_key);
-    rocksdb::Iterator* NewIterator();
+
+    // Returns an iterator for a specific column family
+    rocksdb::Iterator* NewIterator(const std::string& cf_name);
 
 private:
     std::unique_ptr<rocksdb::DB> db_;
+    
+    // Map to store handles for each Column Family
+    std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> cf_handles_;
+    std::mutex cf_mutex_;
+
+    // Helper to retrieve or create a handle
+    rocksdb::ColumnFamilyHandle* GetOrAddHandle(const std::string& cf_name);
 };
 
 // There will be only one global storage, so we expose API to use it

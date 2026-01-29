@@ -1,59 +1,124 @@
 #include "storage.h"
 #include "rocksdb/iterator.h"
 #include <iostream>
+#include <vector>
 
 Storage::Storage(const std::string& db_path) {
     rocksdb::Options options;
     options.create_if_missing = true; 
 
+    // 1. List existing column families
+    std::vector<std::string> family_names;
+    rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, db_path, &family_names);
+    
+    std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
+
+    // If DB exists but ListColumnFamilies failed (unlikely) or returned empty, 
+    // we must at least open the default.
+    if (!status.ok() || family_names.empty()) {
+        column_families.push_back(rocksdb::ColumnFamilyDescriptor(rocksdb::kDefaultColumnFamilyName, rocksdb::ColumnFamilyOptions()));
+    } else {
+        for (const auto& name : family_names) {
+            column_families.push_back(rocksdb::ColumnFamilyDescriptor(name, rocksdb::ColumnFamilyOptions()));
+        }
+    }
+
+    // 2. Open DB with all column families
+    std::vector<rocksdb::ColumnFamilyHandle*> handles;
     rocksdb::DB* db_ptr = nullptr;
-    rocksdb::Status status = rocksdb::DB::Open(options, db_path, &db_ptr);
+    status = rocksdb::DB::Open(options, db_path, column_families, &handles, &db_ptr);
 
     if (!status.ok()) {
         std::cerr << "Failed to open RocksDB: " << status.ToString() << std::endl;
-        // Handle error (throw exception ???)
+        // In a real app, throw or exit.
     }
     else {
-      std::cout << "Opened RocksDB\n";
+        std::cout << "Opened RocksDB with " << handles.size() << " column families.\n";
+        
+        // 3. Map handles to names
+        for (size_t i = 0; i < column_families.size(); i++) {
+            cf_handles_[column_families[i].name] = handles[i];
+        }
     }
     db_.reset(db_ptr);
 }
 
 Storage::~Storage() {
-    // db_ is a unique_ptr, so it will close automatically
+    // ColumnFamilyHandles must be deleted before the DB is deleted.
+    for (auto& pair : cf_handles_) {
+        if (pair.second) {
+            db_->DestroyColumnFamilyHandle(pair.second);
+        }
+    }
+    cf_handles_.clear();
+    // db_ unique_ptr will close the DB automatically here
+}
+
+rocksdb::ColumnFamilyHandle* Storage::GetOrAddHandle(const std::string& cf_name) {
+    std::lock_guard<std::mutex> lock(cf_mutex_);
+    
+    // Check if it exists
+    auto it = cf_handles_.find(cf_name);
+    if (it != cf_handles_.end()) {
+        return it->second;
+    }
+
+    // Create new column family
+    rocksdb::ColumnFamilyHandle* handle;
+    rocksdb::Status status = db_->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), cf_name, &handle);
+    
+    if (!status.ok()) {
+        std::cerr << "Failed to create Column Family '" << cf_name << "': " << status.ToString() << std::endl;
+        return nullptr;
+    }
+
+    cf_handles_[cf_name] = handle;
+    std::cout << "Created new Column Family: " << cf_name << "\n";
+    return handle;
 }
 
 bool Storage::PutCell(const std::string& table_name, const std::string& row_key, const std::string& column_family,
       const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
       const std::string& value) {
-    std::cout << "PutCell: before creating full key\n";
-    std::string full_key = "/tables/" + table_name + "/" + row_key + "/" + column_family + "/" + column_qualifier + "/" + std::to_string(timestamp.count());
-    std::cout << "Trying to put " << full_key << ": " << value << " into the DB\n";
-    rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), full_key, value);
-    std::cout << "Put cell into the DB with status " << status.ok() << "\n";
+    
+    rocksdb::ColumnFamilyHandle* handle = GetOrAddHandle(column_family);
+    if (!handle) return false;
+
+    // Note: column_family name is removed from the key string because 
+    // it is now represented by the physical RocksDB Column Family.
+    std::string full_key = "/tables/" + table_name + "/" + row_key + "/" + column_qualifier + "/" + std::to_string(timestamp.count());
+    
+    // Debug print
+    // std::cout << "PutCell [" << column_family << "]: " << full_key << " = " << value << "\n";
+
+    rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), handle, full_key, value);
     return status.ok();
 }
 
 bool Storage::PutRow(const std::string& row_key, const std::string& value) {
+    // Uses Default CF
     rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), row_key, value);
     return status.ok();
 }
 
 std::string Storage::GetRow(const std::string& row_key) {
+    // Uses Default CF
     std::string value;
     rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), row_key, &value);
     if (!status.ok()) {
-        return ""; // Or handle "Not Found" specifically ???
+        return ""; 
     }
     return value;
 }
 
 bool Storage::DeleteRow(const std::string& row_key) {
+    // Uses Default CF
     rocksdb::Status status = db_->Delete(rocksdb::WriteOptions(), row_key);
     return status.ok();
 }
 
 bool Storage::PutBatch(const std::vector<std::pair<std::string,std::string>>& kvs) {
+    // Writes to Default CF
     rocksdb::WriteBatch batch;
     for (auto const& kv : kvs) {
         batch.Put(kv.first, kv.second);
@@ -67,58 +132,56 @@ bool Storage::PutBatch(const std::vector<std::pair<std::string,std::string>>& kv
 }
 
 void Storage::ScanDatabase(void) {
-  rocksdb::ReadOptions read_options;
-  rocksdb::Iterator* it = db_->NewIterator(read_options);
+    std::lock_guard<std::mutex> lock(cf_mutex_);
+    rocksdb::ReadOptions read_options;
 
-  for (it->SeekToFirst(); it->Valid(); it->Next()) {
-      std::string key = it->key().ToString();
-      std::string value = it->value().ToString();
+    std::cout << "--- Scanning Database ---\n";
+    for (const auto& pair : cf_handles_) {
+        std::string cf_name = pair.first;
+        rocksdb::ColumnFamilyHandle* handle = pair.second;
 
-      std::cout << "Key: " << key << " | Value: " << value << std::endl;
-  }
-
-  if (!it->status().ok()) {
-      std::cerr << "An error occurred: " << it->status().ToString() << std::endl;
-  }
-
-  delete it;
+        std::cout << "Column Family: [" << cf_name << "]\n";
+        
+        rocksdb::Iterator* it = db_->NewIterator(read_options, handle);
+        for (it->SeekToFirst(); it->Valid(); it->Next()) {
+            std::cout << "  " << it->key().ToString() << " => " << it->value().ToString() << "\n";
+        }
+        if (!it->status().ok()) {
+            std::cerr << "  Error: " << it->status().ToString() << "\n";
+        }
+        delete it;
+    }
+    std::cout << "-------------------------\n";
 }
-
-struct RowRecord {
-  std::string full_key;
-  std::string value;
-};
 
 void Storage::GetRowData(const std::string& table_name, const std::string& row_key) {
-  std::vector<RowRecord> results;
-  
-  std::string prefix = "/tables/" + table_name + "/" + row_key + "/";
+    // Since data is split across column families, we must check all of them 
+    // for this specific row key prefix.
+    
+    std::string prefix = "/tables/" + table_name + "/" + row_key + "/";
+    rocksdb::ReadOptions read_options;
+    
+    std::lock_guard<std::mutex> lock(cf_mutex_);
 
-  rocksdb::ReadOptions read_options;
+    for (const auto& pair : cf_handles_) {
+        rocksdb::ColumnFamilyHandle* handle = pair.second;
+        rocksdb::Iterator* it = db_->NewIterator(read_options, handle);
 
-  rocksdb::Iterator* it = db_->NewIterator(read_options);
-
-  for (it->Seek(prefix); it->Valid(); it->Next()) {
-      if (!it->key().starts_with(prefix)) {
-          break;
-      }
-
-      std::string key = it->key().ToString();
-      std::string value = it->value().ToString();
-      std::cout << "Key: " << key << " | Value: " << value << std::endl;
-      
-      results.push_back({it->key().ToString(), it->value().ToString()});
-  }
-
-  if (!it->status().ok()) {
-      std::cerr << "Error during scan: " << it->status().ToString() << std::endl;
-  }
-
-  delete it;
+        for (it->Seek(prefix); it->Valid(); it->Next()) {
+            if (!it->key().starts_with(prefix)) {
+                break;
+            }
+            // Output format: CF:Key => Value
+            std::cout << "[" << pair.first << "] " << it->key().ToString() << " | Value: " << it->value().ToString() << std::endl;
+        }
+        delete it;
+    }
 }
 
-rocksdb::Iterator* Storage::NewIterator() {
-  return db_->NewIterator(rocksdb::ReadOptions());
+rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
+    rocksdb::ColumnFamilyHandle* handle = GetOrAddHandle(cf_name);
+    if (!handle) return nullptr;
+    return db_->NewIterator(rocksdb::ReadOptions(), handle);
 }
 
 static Storage *g_storage = NULL;
