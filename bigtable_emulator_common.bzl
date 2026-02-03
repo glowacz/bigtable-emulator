@@ -26,7 +26,8 @@ bigtable_emulator_common_hdrs = [
     "table.h",
     "test_util.h",
     "to_grpc_status.h",
-    "storage.h"
+    "storage.h",
+    "constants.h"
 ]
 
 bigtable_emulator_common_srcs = [

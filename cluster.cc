@@ -164,6 +164,8 @@ Status Cluster::DeleteTable(std::string const& table_name) {
           "The table has deletion protection.",
           GCP_ERROR_INFO().WithMetadata("table_name", table_name));
     }
+    Storage *storage = GetGlobalStorage();
+    storage->DeleteTable(table_name);
     table_by_name_.erase(it);
   }
   return Status();

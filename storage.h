@@ -29,6 +29,9 @@ public:
     // Scans all Column Families for a specific row key
     void GetRowData(const std::string& table_name, const std::string& row_key);
 
+    // Deletes the table from the manifest and deletes table contents
+    void DeleteTable(std::string table_name);
+
     // Returns an iterator for a specific column family
     rocksdb::Iterator* NewIterator(const std::string& cf_name);
 
@@ -57,3 +60,6 @@ void RollbackSchemaIdx();
 
 // helper function, this should not be here, to be moved to different header in future 
 std::string Trim(const std::string& s);
+
+// Helper to calculate the smallest string strictly greater than all keys starting with 'prefix'
+std::string CalculatePrefixEnd(const std::string& prefix);

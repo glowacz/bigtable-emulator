@@ -184,7 +184,7 @@ class RowTransaction {
  public:
   explicit RowTransaction(std::shared_ptr<Table> table,
                           std::string const& row_key, std::string table_name = "")
-      : row_key_(row_key), table_name_(table_name) {
+      : row_key_(row_key), table_key_(table_name) {
     table_ = std::move(table);
     committed_ = false;
   };
@@ -232,7 +232,8 @@ class RowTransaction {
   // (up to 4KB) value.
   std::string const& row_key_;
   
-  std::string table_name_;
+  // prefix + table name, i.e. projects/p/instances/i/tables/{table_name}
+  std::string table_key_;
 };
 
 google::bigtable::v2::ReadModifyWriteRowResponse

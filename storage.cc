@@ -1,7 +1,9 @@
 #include "storage.h"
+#include "constants.h"
 #include "rocksdb/iterator.h"
 #include <iostream>
 #include <vector>
+#include <sstream>
 
 Storage::Storage(const std::string& db_path) {
     rocksdb::Options options;
@@ -178,6 +180,62 @@ void Storage::GetRowData(const std::string& table_name, const std::string& row_k
     }
 }
 
+void Storage::DeleteTable(std::string table_key) {
+    std::string table_key_to_remove = kTablesPrefix + table_key;
+    std::string manifest = GetRow(kManifestKey);
+
+    std::string new_manifest;
+    bool changed = false;
+
+    if (!manifest.empty()) {
+        std::istringstream iss(manifest);
+        std::string line;
+
+        // Iterate through lines, keeping only those that do not match the key
+        while (std::getline(iss, line)) {
+            if (Trim(line) != table_key_to_remove) {
+            new_manifest += line;
+            new_manifest.push_back('\n'); // Maintain newline format
+            } else {
+            changed = true; // We found and skipped the target key
+            }
+        }
+    }
+
+    // std::cout << "Old manifest was: " << manifest << "\n";
+    // std::cout << "New manifest is: " << new_manifest << "\n";
+
+    if (changed) {
+        // Save manifest with this table deleted
+        PutRow(kManifestKey, new_manifest);
+
+        // Delete cell values
+
+        std::string start_key = "/tables/" + table_key + "/";
+
+        std::cout << "Deleting all cells with prefix " << start_key << "\n";
+        
+        std::string end_key = CalculatePrefixEnd(start_key);
+
+        rocksdb::WriteBatch batch;
+        
+        for (const auto& pair : cf_handles_) {
+            rocksdb::ColumnFamilyHandle* handle = pair.second;
+            batch.DeleteRange(handle, start_key, end_key);
+        }
+        
+        batch.DeleteRange(db_->DefaultColumnFamily(), start_key, end_key);
+
+        rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+
+        // Delete the persisted schema
+        std::cout << "Deleting the persisted schema under key: " << start_key << "\n";
+        DeleteRow(table_key_to_remove);
+
+        // return status.ok();
+    }
+}
+
 rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
     rocksdb::ColumnFamilyHandle* handle = GetOrAddHandle(cf_name);
     if (!handle) return nullptr;
@@ -250,4 +308,23 @@ std::string Trim(const std::string& s) {
   size_t b = s.size();
   while (b > a && (s[b-1] == '\n' || s[b-1] == '\r')) --b;
   return s.substr(a, b - a);
+}
+
+// Helper to calculate the smallest string strictly greater than all keys starting with 'prefix'
+std::string CalculatePrefixEnd(const std::string& prefix) {
+    std::string end_key = prefix;
+    // Strip trailing 0xFF bytes as they cannot be incremented
+    while (!end_key.empty() && static_cast<unsigned char>(end_key.back()) == 0xFF) {
+        end_key.pop_back();
+    }
+    
+    if (end_key.empty()) {
+        // Corner case: The prefix was all 0xFF. Theoretically, there is no end key.
+        // In your specific schema ("/tables/..."), this will never happen.
+        return "\xff"; 
+    }
+    
+    // Increment the last byte to get the next prefix
+    end_key.back()++;
+    return end_key;
 }

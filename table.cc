@@ -57,9 +57,10 @@
 #include <atomic>
 #include <sstream>
 #include "storage.h"
+#include "constants.h"
 
-static const std::string kTablesPrefix = "/sys/tables/";
-static const std::string kManifestKey = "/sys/tables/_manifest";
+// static const std::string kTablesPrefix = "/sys/tables/";
+// static const std::string kManifestKey = "/sys/tables/_manifest";
 
 void store_schema(const google::bigtable::admin::v2::Table& schema) {
   Storage* storage = GetGlobalStorage();
@@ -82,6 +83,9 @@ void store_schema(const google::bigtable::admin::v2::Table& schema) {
 
   std::vector<std::pair<std::string, std::string>> batch;
   batch.emplace_back(table_key, value);
+
+  // std::cout << "====================================================================\n";
+  std::cout << "Storing schema " << table_key << ": " << value << "\n";
 
   if (!present) {
     std::string new_manifest = manifest;
@@ -1262,8 +1266,8 @@ Status RowTransaction::SetCell(
     std::cout << "Before GetGlobalStorage\n";
     Storage *storage = GetGlobalStorage();
     std::cout << "Before PutCell (to Global Storage)\n";
-    std::cout << "Table name: " << table_name_ << "\n";
-    storage->PutCell(table_name_, row_key_, set_cell.family_name(), 
+    std::cout << "Table name: " << table_key_ << "\n";
+    storage->PutCell(table_key_, row_key_, set_cell.family_name(), 
                      set_cell.column_qualifier(), timestamp, set_cell.value());
     std::cout << "After PutCell (to Global Storage)\n";
 
