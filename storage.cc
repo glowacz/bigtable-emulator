@@ -296,9 +296,25 @@ void Storage::DeleteColumn(const std::string& table_name, const std::string& row
     rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
     rocksdb::WriteBatch batch;
         
-    std::cout << "\nDeleting all cells from " << start_key << "\nto " << end_key << "\nin CF " << prefixed_cf_name
+    std::cout << "\nDeleteColumn: Deleting all cells from\n" << start_key << " to\n" << end_key << "\nin CF " << prefixed_cf_name
             << "\n===================================\n\n";
     batch.DeleteRange(handle, start_key, end_key);
+    rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+}
+
+void Storage::DeleteRow(const std::string& table_name, const std::string& row_key) {
+    std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
+    std::string end_key = CalculatePrefixEnd(start_key);
+
+    std::cout << "\nDeleteRow:Deleting all cells from\n" << start_key << " to\n" << end_key
+    << "\n===================================\n\n";
+
+    rocksdb::WriteBatch batch;
+    for (const auto& pair : cf_handles_) {
+        std::string cf_name = pair.first;
+        rocksdb::ColumnFamilyHandle* handle = pair.second;
+        batch.DeleteRange(handle, start_key, end_key);
+    }
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
 }
 

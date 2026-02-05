@@ -1185,27 +1185,36 @@ Status RowTransaction::DeleteFromColumn(
 }
 
 Status RowTransaction::DeleteFromRow() {
-  bool row_existed;
-  for (auto& column_family : table_->column_families_) {
-    auto deleted_columns = column_family.second->DeleteRow(row_key_);
+    // TODO: probably nothing / remove the commented in-memory implementation
+  // OR
+  // implement own rollback logic
 
-    for (auto& column : deleted_columns) {
-      for (auto& cell : column.second) {
-        RestoreValue restrore_value = {*column_family.second,
-                                       std::move(column.first), cell.timestamp,
-                                       std::move(cell.value)};
-        undo_.emplace(std::move(restrore_value));
-        row_existed = true;
-      }
-    }
-  }
+  Storage *storage = GetGlobalStorage();
+  storage->DeleteRow(table_key_, row_key_);
 
-  if (row_existed) {
-    return Status();
-  }
+  return Status();
 
-  return NotFoundError("row not found in table",
-                       GCP_ERROR_INFO().WithMetadata("row", row_key_));
+  // bool row_existed;
+  // for (auto& column_family : table_->column_families_) {
+  //   auto deleted_columns = column_family.second->DeleteRow(row_key_);
+
+  //   for (auto& column : deleted_columns) {
+  //     for (auto& cell : column.second) {
+  //       RestoreValue restrore_value = {*column_family.second,
+  //                                      std::move(column.first), cell.timestamp,
+  //                                      std::move(cell.value)};
+  //       undo_.emplace(std::move(restrore_value));
+  //       row_existed = true;
+  //     }
+  //   }
+  // }
+
+  // if (row_existed) {
+  //   return Status();
+  // }
+
+  // return NotFoundError("row not found in table",
+  //                      GCP_ERROR_INFO().WithMetadata("row", row_key_));
 }
 
 Status RowTransaction::DeleteFromFamily(
