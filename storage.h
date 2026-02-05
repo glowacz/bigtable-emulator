@@ -38,6 +38,10 @@ public:
     // Deletes a column family (and its data)
     void DeleteColumnFamily(const std::string &prefixed_cf_name);
 
+    // "Deletes the column" - meaning it deletes all data (from all timestamps) of a column from a specific row
+    void DeleteColumn(const std::string& table_name, const std::string& row_key, 
+                    const std::string &prefixed_cf_name, const std::string &column_name);
+
     // Returns an iterator for a specific column family
     rocksdb::Iterator* NewIterator(const std::string& cf_name);
 

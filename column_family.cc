@@ -429,6 +429,7 @@ StatusOr<absl::optional<std::string>> ColumnFamilyRow::UpdateCell(
 std::vector<Cell> ColumnFamilyRow::DeleteColumn(
     std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
+  std::cout << "\n\nDeleting column with qualifier " << column_qualifier << "\n\n";
   auto column_it = columns_.find(column_qualifier);
   if (column_it == columns_.end()) {
     return {};
@@ -507,6 +508,10 @@ std::map<std::string, std::vector<Cell>> ColumnFamily::DeleteRow(
 std::vector<Cell> ColumnFamily::DeleteColumn(
     std::string const& row_key, std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
+  std::cout << "Deleting from column " << column_qualifier << " | from row " << row_key << "\n";
+  for (const auto& pair : rows_) {
+    std::cout << pair.first << "\n";
+  }
   auto row_it = rows_.find(row_key);
 
   return DeleteColumn(row_it, column_qualifier, time_range);
@@ -516,7 +521,9 @@ std::vector<Cell> ColumnFamily::DeleteColumn(
     std::map<std::string, ColumnFamilyRow>::iterator row_it,
     std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
+  std::cout << "ColumnFamily::DeleteColumn with row_it\n";
   if (row_it != rows_.end()) {
+    std::cout << "before ColumnFamilyRow::DeleteColumn\n";
     auto erased_cells =
         row_it->second.DeleteColumn(column_qualifier, time_range);
     if (!row_it->second.HasColumns()) {

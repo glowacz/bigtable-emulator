@@ -288,6 +288,20 @@ void Storage::DeleteColumnFamily(const std::string &prefixed_cf_name) {
     cf_handles_.erase(prefixed_cf_name);
 }
 
+void Storage::DeleteColumn(const std::string& table_name, const std::string& row_key, 
+                            const std::string &prefixed_cf_name, const std::string &column_name) {
+    std::string start_key = "/tables/" + table_name + "/" + row_key + "/" + column_name + "/";
+    std::string end_key = CalculatePrefixEnd(start_key);
+
+    rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
+    rocksdb::WriteBatch batch;
+        
+    std::cout << "\nDeleting all cells from " << start_key << "\nto " << end_key << "\nin CF " << prefixed_cf_name
+            << "\n===================================\n\n";
+    batch.DeleteRange(handle, start_key, end_key);
+    rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+}
+
 rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
     rocksdb::ColumnFamilyHandle* handle = GetOrAddHandle(cf_name);
     if (!handle) return nullptr;

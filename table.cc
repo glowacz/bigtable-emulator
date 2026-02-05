@@ -1129,6 +1129,7 @@ Status RowTransaction::MergeToCell(
 Status RowTransaction::DeleteFromColumn(
     ::google::bigtable::v2::Mutation_DeleteFromColumn const&
         delete_from_column) {
+  std::cout << "Deleting from column " << delete_from_column.column_qualifier() << " | from family " << delete_from_column.family_name() << "\n";
   auto maybe_column_family = table_->FindColumnFamily(delete_from_column);
   if (!maybe_column_family.ok()) {
     return maybe_column_family.status();
@@ -1163,6 +1164,15 @@ Status RowTransaction::DeleteFromColumn(
   auto deleted_cells = column_family.DeleteColumn(
       row_key_, delete_from_column.column_qualifier(),
       delete_from_column.time_range());
+  
+  // TODO: probably nothing
+  // just wanted to note that the above call to the in-memory implementation 
+  // returns nothing if this row/column was created before restarting the emulator
+  // but we will actually delete sth from storage below; so restore_value wouldn't make sense in such case
+  // but we'll keep it, because why not
+  std::string prefixed_cf_name = table_key_ + "/" + delete_from_column.family_name();
+  Storage *storage = GetGlobalStorage();
+  storage->DeleteColumn(table_key_, row_key_, prefixed_cf_name, delete_from_column.column_qualifier());
 
   for (auto& cell : deleted_cells) {
     RestoreValue restore_value{
@@ -1423,6 +1433,7 @@ void RowTransaction::Undo() {
 
     auto* delete_value = absl::get_if<DeleteValue>(&op);
     if (delete_value) {
+      // TODO: probably should add persistence to DeleteTimeStamp
       delete_value->column_family.DeleteTimeStamp(
           row_key, std::move(delete_value->column_qualifier),
           delete_value->timestamp);
