@@ -32,6 +32,9 @@ public:
     // Deletes the table from the manifest and deletes table contents
     void DeleteTable(std::string table_name);
 
+    // Deletes all column families for table identified by table_prefix
+    void DeleteColumnFamiliesForTable(const std::string& table_prefix);
+
     // Returns an iterator for a specific column family
     rocksdb::Iterator* NewIterator(const std::string& cf_name);
 

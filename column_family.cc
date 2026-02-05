@@ -757,7 +757,11 @@ PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
     start_row_key_(start_row_key) {
   // Define the prefix specifically for this table
   // Storage format: /tables/<table_name>/<row>/...
+  std::cout << "=======================\nCreated PersistentFilteredColumnFamilyStream for cf " << family << "\n=======================\n";
   table_prefix_ = "/tables/" + table_name + "/";
+  std::string prefix = table_name + "/";
+  std::string bare_cf_name = family.substr(family.find(prefix) + prefix.length());
+  cur_family_bare_ = bare_cf_name;
 }
 
 PersistentFilteredColumnFamilyStream::~PersistentFilteredColumnFamilyStream() = default;
@@ -804,7 +808,7 @@ CellView const& PersistentFilteredColumnFamilyStream::Value() const {
   if (!current_view_.has_value()) {
       current_view_.emplace(
           cur_row_, 
-          cur_family_, 
+          cur_family_bare_, 
           cur_qualifier_, 
           cur_timestamp_, 
           cur_value_

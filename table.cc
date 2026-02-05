@@ -215,6 +215,7 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
   auto new_schema = schema_;
   auto new_column_families = column_families_;
   for (auto const& modification : request.modifications()) {
+    std::string prefixed_cf_id = name_ + "/" + modification.id();
     if (modification.drop()) {
       if (IsDeleteProtectedNoLock()) {
         return FailedPreconditionError(
@@ -222,19 +223,19 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
             GCP_ERROR_INFO().WithMetadata("modification",
                                           modification.DebugString()));
       }
-      if (new_column_families.erase(modification.id()) == 0) {
+      if (new_column_families.erase(prefixed_cf_id) == 0) {
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
-      if (new_schema.mutable_column_families()->erase(modification.id()) == 0) {
+      if (new_schema.mutable_column_families()->erase(prefixed_cf_id) == 0) {
         return InternalError("Column family with no schema.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
     } else if (modification.has_update()) {
       auto& cfs = *new_schema.mutable_column_families();
-      auto cf_it = cfs.find(modification.id());
+      auto cf_it = cfs.find(prefixed_cf_id);
       if (cf_it == cfs.end()) {
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
@@ -290,12 +291,12 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
           return status;
         }
 
-        auto it = new_column_families.find(modification.id());
+        auto it = new_column_families.find(prefixed_cf_id);
         if (it == new_column_families.end()) {
           return InvalidArgumentError(
               "Attempt to modify Column Family that is not running",
               GCP_ERROR_INFO().WithMetadata("Column Family",
-                                            modification.id()));
+                                            prefixed_cf_id));
         }
         it->second->SetGCRule(gc_rule);
       }
@@ -325,14 +326,14 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
       }
       cf = std::move(maybe_cf.value());
 
-      if (!new_column_families.emplace(modification.id(), cf).second) {
+      if (!new_column_families.emplace(prefixed_cf_id, cf).second) {
         return AlreadyExistsError(
             "Column family already exists.",
             GCP_ERROR_INFO().WithMetadata("modification",
                                           modification.DebugString()));
       }
       if (!new_schema.mutable_column_families()
-               ->emplace(modification.id(), modification.create())
+               ->emplace(prefixed_cf_id, modification.create())
                .second) {
         return InternalError("Column family with schema but no data.",
                              GCP_ERROR_INFO().WithMetadata(
@@ -394,7 +395,8 @@ Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
 template <typename MESSAGE>
 StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
     MESSAGE const& message) const {
-  auto column_family_it = column_families_.find(message.family_name());
+  // auto column_family_it = column_families_.find(message.family_name());
+  auto column_family_it = column_families_.find(name_ + "/" + message.family_name());
   if (column_family_it == column_families_.end()) {
     return NotFoundError(
         "No such column family.",
@@ -1263,11 +1265,14 @@ Status RowTransaction::SetCell(
     // timestamp;
     // set_cell.value();
 
+    std::string family_with_table_name = table_key_ + "/" + set_cell.family_name();
+
     std::cout << "Before GetGlobalStorage\n";
     Storage *storage = GetGlobalStorage();
     std::cout << "Before PutCell (to Global Storage)\n";
     std::cout << "Table name: " << table_key_ << "\n";
-    storage->PutCell(table_key_, row_key_, set_cell.family_name(), 
+    // storage->PutCell(table_key_, row_key_, set_cell.family_name(), 
+    storage->PutCell(table_key_, row_key_, family_with_table_name, 
                      set_cell.column_qualifier(), timestamp, set_cell.value());
     std::cout << "After PutCell (to Global Storage)\n";
 

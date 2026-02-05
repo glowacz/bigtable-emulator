@@ -91,7 +91,7 @@ bool Storage::PutCell(const std::string& table_name, const std::string& row_key,
     std::string full_key = "/tables/" + table_name + "/" + row_key + "/" + column_qualifier + "/" + std::to_string(timestamp.count());
     
     // Debug print
-    // std::cout << "PutCell [" << column_family << "]: " << full_key << " = " << value << "\n";
+    std::cout << "PutCell [" << column_family << "]: " << full_key << " = " << value << "\n";
 
     rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), handle, full_key, value);
     return status.ok();
@@ -209,30 +209,78 @@ void Storage::DeleteTable(std::string table_key) {
         // Save manifest with this table deleted
         PutRow(kManifestKey, new_manifest);
 
-        // Delete cell values
+        // delete column families
+        DeleteColumnFamiliesForTable(table_key + "/");
 
         std::string start_key = "/tables/" + table_key + "/";
 
-        std::cout << "Deleting all cells with prefix " << start_key << "\n";
-        
-        std::string end_key = CalculatePrefixEnd(start_key);
+        // // Delete cell values - now deleting column families handles that
 
-        rocksdb::WriteBatch batch;
+        // std::cout << "Deleting all cells with prefix " << start_key << "\n";
         
-        for (const auto& pair : cf_handles_) {
-            rocksdb::ColumnFamilyHandle* handle = pair.second;
-            batch.DeleteRange(handle, start_key, end_key);
-        }
-        
-        batch.DeleteRange(db_->DefaultColumnFamily(), start_key, end_key);
+        // std::string end_key = CalculatePrefixEnd(start_key);
 
-        rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+        // rocksdb::WriteBatch batch;
+        
+        // for (const auto& pair : cf_handles_) {
+        //     rocksdb::ColumnFamilyHandle* handle = pair.second;
+        //     std::cout << "===================================\nDeleting all cells for column family " << pair.first << "\n===================================\n";
+        //     batch.DeleteRange(handle, start_key, end_key);
+        // }
+        
+        // batch.DeleteRange(db_->DefaultColumnFamily(), start_key, end_key);
+
+        // rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
 
         // Delete the persisted schema
         std::cout << "Deleting the persisted schema under key: " << start_key << "\n";
         DeleteRow(table_key_to_remove);
 
-        // return status.ok();
+        // // return status.ok();
+    }
+}
+
+void Storage::DeleteColumnFamiliesForTable(const std::string& table_prefix) {
+    std::lock_guard<std::mutex> lock(cf_mutex_);
+    std::vector<std::string> cfs_to_remove;
+
+    // 1. Identify Column Families that match the prefix
+    for (const auto& pair : cf_handles_) {
+        const std::string& name = pair.first;
+        
+        // Safety: Never drop the default column family
+        if (name == rocksdb::kDefaultColumnFamilyName) {
+            continue;
+        }
+
+        // Check if name starts with prefix
+        if (name.size() >= table_prefix.size() && 
+            name.compare(0, table_prefix.size(), table_prefix) == 0) {
+            cfs_to_remove.push_back(name);
+        }
+    }
+
+    // 2. Drop and Destroy handles
+    for (const auto& name : cfs_to_remove) {
+        rocksdb::ColumnFamilyHandle* handle = cf_handles_[name];
+        
+        std::cout << "Dropping Column Family: " << name << "\n";
+        
+        // Drop the Column Family from RocksDB (persisted deletion)
+        rocksdb::Status status = db_->DropColumnFamily(handle);
+        if (!status.ok()) {
+            std::cerr << "Failed to drop Column Family '" << name << "': " << status.ToString() << "\n";
+            continue; 
+        }
+
+        // Destroy the in-memory handle object
+        status = db_->DestroyColumnFamilyHandle(handle);
+        if (!status.ok()) {
+            std::cerr << "Failed to destroy handle for '" << name << "': " << status.ToString() << "\n";
+        }
+
+        // Remove from our internal map
+        cf_handles_.erase(name);
     }
 }
 

@@ -671,6 +671,7 @@ class PersistentFilteredColumnFamilyStream : public AbstractCellStreamImpl {
    // CellView holds std::reference_wrapper, so these strings must persist
    mutable std::string cur_row_;
    mutable std::string cur_family_;
+   mutable std::string cur_family_bare_;
    mutable std::string cur_qualifier_;
    mutable std::chrono::milliseconds cur_timestamp_;
    mutable std::string cur_value_;
