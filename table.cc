@@ -228,6 +228,9 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
+      // TODO: maybe handle error
+      Storage *storage = GetGlobalStorage();
+      storage->DeleteColumnFamily(prefixed_cf_id);
       if (new_schema.mutable_column_families()->erase(prefixed_cf_id) == 0) {
         return InternalError("Column family with no schema.",
                              GCP_ERROR_INFO().WithMetadata(

@@ -262,26 +262,30 @@ void Storage::DeleteColumnFamiliesForTable(const std::string& table_prefix) {
 
     // 2. Drop and Destroy handles
     for (const auto& name : cfs_to_remove) {
-        rocksdb::ColumnFamilyHandle* handle = cf_handles_[name];
-        
-        std::cout << "Dropping Column Family: " << name << "\n";
-        
-        // Drop the Column Family from RocksDB (persisted deletion)
-        rocksdb::Status status = db_->DropColumnFamily(handle);
-        if (!status.ok()) {
-            std::cerr << "Failed to drop Column Family '" << name << "': " << status.ToString() << "\n";
-            continue; 
-        }
-
-        // Destroy the in-memory handle object
-        status = db_->DestroyColumnFamilyHandle(handle);
-        if (!status.ok()) {
-            std::cerr << "Failed to destroy handle for '" << name << "': " << status.ToString() << "\n";
-        }
-
-        // Remove from our internal map
-        cf_handles_.erase(name);
+        DeleteColumnFamily(name);
     }
+}
+
+void Storage::DeleteColumnFamily(const std::string &prefixed_cf_name) {
+    rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
+        
+    std::cout << "Dropping Column Family: " << prefixed_cf_name << "\n";
+    
+    // Drop the Column Family from RocksDB (persisted deletion)
+    rocksdb::Status status = db_->DropColumnFamily(handle);
+    if (!status.ok()) {
+        std::cerr << "Failed to drop Column Family '" << prefixed_cf_name << "': " << status.ToString() << "\n";
+        return;
+    }
+
+    // Destroy the in-memory handle object
+    status = db_->DestroyColumnFamilyHandle(handle);
+    if (!status.ok()) {
+        std::cerr << "Failed to destroy handle for '" << prefixed_cf_name << "': " << status.ToString() << "\n";
+    }
+
+    // Remove from our internal map
+    cf_handles_.erase(prefixed_cf_name);
 }
 
 rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
