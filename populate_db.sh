@@ -37,12 +37,14 @@ echo "Populating user-002 with version history..."
 
 # 1. Initial write (Timestamp T1) - Consolidated
 run_cbt set users user-002 \
-    id:name="Alice Smith" \
-    id:email="alice@example.com" \
+    id:name="Jon Jones" \
+    id:email="jones@ufc.com" \
     id:location="New York"
 
 # 2. Update write (Timestamp T2) - Simulates a move
 run_cbt set users user-002 id:location="London"
+
+run_cbt set users user-002 id:location="Paris"
 
 # ==========================================
 # TABLE 2: iot-metrics
