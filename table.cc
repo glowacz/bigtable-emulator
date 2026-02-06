@@ -1220,41 +1220,32 @@ Status RowTransaction::DeleteFromRow() {
 Status RowTransaction::DeleteFromFamily(
     ::google::bigtable::v2::Mutation_DeleteFromFamily const&
         delete_from_family) {
-  // If the request references an incorrect schema (non-existent
-  // column family) then return a failure status error immediately.
-  auto maybe_column_family = table_->FindColumnFamily(delete_from_family);
-  if (!maybe_column_family.ok()) {
-    return maybe_column_family.status();
-  }
+  std::cout << "RowTransaction::DeleteFromFamily: Deleting from family " 
+    << delete_from_family.family_name() << "\n";
+  // TODO: think if it is good that we deleted the in-memory implementation
 
-  auto column_family_it = table_->find(delete_from_family.family_name());
-  if (column_family_it == table_->end()) {
+  // If the request references an incorrect schema (non-existent
+  // column family) then return a failure status error immediately.  
+  std::string prefixed_cf_name = table_key_ + "/" + delete_from_family.family_name();
+  Storage *storage = GetGlobalStorage();
+
+  if (!storage->CFExists(prefixed_cf_name)) {
     return NotFoundError(
         "column family not found in table",
         GCP_ERROR_INFO().WithMetadata("column family",
                                       delete_from_family.family_name()));
   }
 
-  std::map<std::string, ColumnFamilyRow>::iterator column_family_row_it;
-  if (column_family_it->second->find(row_key_) ==
-      column_family_it->second->end()) {
+  if (!storage->RowExists(table_key_, row_key_, prefixed_cf_name)) {
     // The row does not exist
     return NotFoundError(
         "row key is not found in column family",
         GCP_ERROR_INFO()
             .WithMetadata("row key", row_key_)
-            .WithMetadata("column family", column_family_it->first));
+            .WithMetadata("column family", delete_from_family.family_name()));
   }
-
-  auto deleted = column_family_it->second->DeleteRow(row_key_);
-  for (auto const& column : deleted) {
-    for (auto const& cell : column.second) {
-      RestoreValue restore_value{*column_family_it->second,
-                                 std::move(column.first), cell.timestamp,
-                                 std::move(cell.value)};
-      undo_.emplace(std::move(restore_value));
-    }
-  }
+  
+  bool deleted = storage->DeleteCFRow(table_key_, row_key_, prefixed_cf_name);
 
   return Status();
 }

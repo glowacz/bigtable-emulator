@@ -45,8 +45,25 @@ public:
     // Deletes a row from a table
     void DeleteRow(const std::string& table_name, const std::string& row_key);
 
+    // Deletes all cells from a given CF in a given row
+    bool DeleteCFRow(const std::string& table_name, const std::string& row_key,
+        const std::string &prefixed_cf_name);
+    
+    // Checks if this CF exists in a table (table name is already embedded in the prefixed_cf_name)
+    bool CFExists(const std::string &prefixed_cf_name);
+
+    // Checks if row_key exists in a CF
+    bool RowExists(const std::string& table_name, const std::string& row_key,
+        const std::string &prefixed_cf_name);
+
     // Returns an iterator for a specific column family
     rocksdb::Iterator* NewIterator(const std::string& cf_name);
+    
+    // Checks if there are some cells with a given prefix (e. g. if a row exists in a given table
+    // or a column exists in a given row)
+    bool IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle, 
+        const rocksdb::Slice& start_key, 
+        const rocksdb::Slice& end_key);
 
 private:
     std::unique_ptr<rocksdb::DB> db_;

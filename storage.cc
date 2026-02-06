@@ -306,7 +306,7 @@ void Storage::DeleteRow(const std::string& table_name, const std::string& row_ke
     std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
     std::string end_key = CalculatePrefixEnd(start_key);
 
-    std::cout << "\nDeleteRow:Deleting all cells from\n" << start_key << " to\n" << end_key
+    std::cout << "\nDeleteRow: Deleting all cells from\n" << start_key << " to\n" << end_key
     << "\n===================================\n\n";
 
     rocksdb::WriteBatch batch;
@@ -318,10 +318,81 @@ void Storage::DeleteRow(const std::string& table_name, const std::string& row_ke
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
 }
 
+bool Storage::DeleteCFRow(const std::string& table_name, const std::string& row_key,
+        const std::string &prefixed_cf_name) {
+    // This should be enough protection against concurrency issues
+    // If the row was deleted before we delete from it below
+    // then we just won't delete anything
+    
+    rocksdb::ColumnFamilyHandle* handle;
+    auto it = cf_handles_.find(prefixed_cf_name);
+    if (it != cf_handles_.end()) {
+        handle = it->second;
+    } else {
+        return false;
+    }
+
+    std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
+    std::string end_key = CalculatePrefixEnd(start_key);
+
+    // if (IsRangeEmpty(handle, start_key, end_key)) {
+    //     std::cout << "\nDeleteCFRow: There was nothing between\n" << start_key << " and\n" << end_key
+    //         << " in CF\n" << prefixed_cf_name << "\n===================================\n\n";
+        
+    //     return false;
+    // }
+
+    std::cout << "\nDeleteCFRow: Deleting all cells from\n" << start_key << " to\n" << end_key
+        << " in CF\n" << prefixed_cf_name << "\n===================================\n\n";
+
+    rocksdb::WriteBatch batch;
+    
+    
+    batch.DeleteRange(handle, start_key, end_key);
+    rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+    std::cout << "Status is " << status.code() << "\n";
+
+    return true;
+}
+
+bool Storage::CFExists(const std::string &prefixed_cf_name) {
+    return cf_handles_.find(prefixed_cf_name) != cf_handles_.end();
+}
+
+bool Storage::RowExists(const std::string& table_name, const std::string& row_key,
+    const std::string &prefixed_cf_name) {
+    rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
+
+    std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
+    std::string end_key = CalculatePrefixEnd(start_key);
+
+    return !IsRangeEmpty(handle, start_key, end_key);
+}
+
 rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
     rocksdb::ColumnFamilyHandle* handle = GetOrAddHandle(cf_name);
     if (!handle) return nullptr;
     return db_->NewIterator(rocksdb::ReadOptions(), handle);
+}
+
+bool Storage::IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle, 
+    const rocksdb::Slice& start_key, 
+    const rocksdb::Slice& end_key) {
+    rocksdb::ReadOptions read_options;
+    // Optimization: Set the upper bound to avoid internal work beyond end_key
+    read_options.iterate_upper_bound = &end_key; 
+
+    rocksdb::Iterator* it = db_->NewIterator(read_options, handle);
+
+    it->Seek(start_key);
+
+    if (it->Valid()) {
+    if (it->key().compare(end_key) < 0) {
+    return false;
+    }
+    }
+
+    return true;
 }
 
 static Storage *g_storage = NULL;

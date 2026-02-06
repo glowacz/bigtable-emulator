@@ -15,6 +15,8 @@ table = instance.table("cars")
 row = table.row("car-1")
 
 # Deletes all cells in the 'history' column family for this row
-row.delete_cells(column_family_id="params", columns=row.ALL_COLUMNS)
-# row.delete()
-row.commit()
+ret = row.delete_cells(column_family_id="iddup", columns=row.ALL_COLUMNS)
+# ret = row.delete()
+print(ret)
+ret = row.commit()
+print(ret)
