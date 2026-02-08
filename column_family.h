@@ -652,6 +652,8 @@ class PersistentFilteredColumnFamilyStream : public AbstractCellStreamImpl {
    bool HasValue() const override;
    CellView const& Value() const override;
    bool Next(NextMode mode) override;
+   std::string const& column_family_name() const { return cur_family_; }
+
  
   private:
    // Helper to parse the current RocksDB key into member variables
@@ -678,6 +680,12 @@ class PersistentFilteredColumnFamilyStream : public AbstractCellStreamImpl {
  
    // Cache for the current view
    mutable std::optional<CellView> current_view_;
+
+   std::shared_ptr<StringRangeSet const> row_ranges_;
+   std::vector<std::shared_ptr<re2::RE2 const>> row_regexes_;
+   mutable StringRangeSet column_ranges_;
+   std::vector<std::shared_ptr<re2::RE2 const>> column_regexes_;
+   mutable TimestampRangeSet timestamp_ranges_;
 };
 
 }  // namespace emulator

@@ -769,13 +769,47 @@ PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
   std::string prefix = table_name + "/";
   std::string bare_cf_name = family.substr(family.find(prefix) + prefix.length());
   cur_family_bare_ = bare_cf_name;
+  row_ranges_ = std::make_shared<StringRangeSet const>(StringRangeSet::All());
+  column_ranges_ = StringRangeSet::All();
+  timestamp_ranges_ = TimestampRangeSet::All();
 }
 
 PersistentFilteredColumnFamilyStream::~PersistentFilteredColumnFamilyStream() = default;
 
 bool PersistentFilteredColumnFamilyStream::ApplyFilter(InternalFilter const& internal_filter) {
-  // As requested: implementation is ignored and returns false
-  return false;
+  // Do not allow applying filters after iteration started.
+  if (initialized_) {
+    return false;
+  }
+
+  // Very similar logic to FilteredColumnFamilyStream::FilterApply
+  return absl::visit(
+      [this](auto const& f) -> bool {
+        using T = std::decay_t<decltype(f)>;
+        if constexpr (std::is_same_v<T, ColumnRange>) {
+          // Only apply a ColumnRange if it targets this column family.
+         if (f.column_family == cur_family_bare_) {
+            column_ranges_.Intersect(f.range);
+          }
+          return true;
+        } else if constexpr (std::is_same_v<T, TimestampRange>) {
+          timestamp_ranges_.Intersect(f.range);
+          return true;
+        } else if constexpr (std::is_same_v<T, RowKeyRegex>) {
+          row_regexes_.emplace_back(f.regex);
+          return true;
+        } else if constexpr (std::is_same_v<T, FamilyNameRegex>) {
+          // family-name regex cannot be applied at this per-family stream
+          // (the caller should select the family streams). Indicate failure.
+          return false;
+        } else if constexpr (std::is_same_v<T, ColumnRegex>) {
+          column_regexes_.emplace_back(f.regex);
+          return true;
+        } else {
+          return false;
+        }
+      },
+      internal_filter);
 }
 
 void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
@@ -786,9 +820,17 @@ void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
 
   it_.reset(storage_->NewIterator(cur_family_));
 
+  // Build seek key. Prefer explicit start_row_key_; if not set, use earliest
+  // finite start from the row_ranges_ (if any), otherwise seek to table prefix.
   std::string search_key = table_prefix_;
   if (!start_row_key_.empty()) {
-      search_key += start_row_key_;
+    search_key += start_row_key_;
+  } else if (row_ranges_ && !row_ranges_->disjoint_ranges().empty()) {
+    auto const& first = *row_ranges_->disjoint_ranges().begin();
+    // first.start() is a variant; if it is a finite string use it as seek.
+    if (auto p = absl::get_if<std::string>(&first.start())) {
+      search_key += *p;
+    }
   }
 
   it_->Seek(search_key);
@@ -833,9 +875,10 @@ bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
 
   if (mode == NextMode::kCell) {
     std::cout << cur_family_  << ": PersistentFilteredColumnFamilyStream::Next | kCell\n";
+    // Advance once and let ParseCurrentKey() scan forward to the next matching entry
     it_->Next();
     has_value_ = ParseCurrentKey();
-    return true; // NextMode::kCell is always supported
+    return true; // supports kCell
   }
   else if (mode == NextMode::kColumn) {
     std::cout << "PersistentFilteredColumnFamilyStream::Next | kColumn\n";
@@ -879,51 +922,121 @@ bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
 bool PersistentFilteredColumnFamilyStream::ParseCurrentKey() {
   std::cout << "ParseCurrentKey start\n";
 
-  if (!it_->Valid()) return false;
+  if (!it_) return false;
+  // Loop until we find a key that belongs to this table and passes filters.
+  while (it_->Valid()) {
+    std::string key = it_->key().ToString();
 
-  std::string key = it_->key().ToString();
+    std::cout << "ParseCurrentKey key is " << key << "\n";
 
-  std::cout << "ParseCurrentKey key is " << key << "\n";
-
-  // Ensure we are still within the specific table
-  if (key.rfind(table_prefix_, 0) != 0) { // starts_with check
+    // Ensure we are still within the specific table prefix.
+    if (key.rfind(table_prefix_, 0) != 0) {
       return false;
-  }
+    }
 
-  // Remove the prefix to parse the rest
-  // Remaining: <row_key>/<column_family>/<column_qualifier>/<timestamp>
-  // Note: This naive parsing assumes row_key/fam/qual do not contain '/'. 
-  // This matches the provided Storage::PutCell implementation.
-  std::string_view remaining(key.data() + table_prefix_.size(), key.size() - table_prefix_.size());
+    std::string_view remaining(
+        key.data() + table_prefix_.size(), key.size() - table_prefix_.size());
 
-  size_t pos1 = remaining.find('/');
-  if (pos1 == std::string::npos) return false;
-  cur_row_ = std::string(remaining.substr(0, pos1));
+    // Expected layout: <row_key>/<column_qualifier>/<timestamp>
+    size_t pos1 = remaining.find('/');
+    if (pos1 == std::string::npos) {
+      it_->Next();
+      continue;
+    }
+    cur_row_ = std::string(remaining.substr(0, pos1));
 
-  // size_t pos2 = remaining.find('/', pos1 + 1);
-  // if (pos2 == std::string::npos) return false;
-  // cur_family_ = std::string(remaining.substr(pos1 + 1, pos2 - pos1 - 1));
-  size_t pos2 = pos1;
+    size_t pos2 = remaining.find('/', pos1 + 1);
+    if (pos2 == std::string::npos) {
+      it_->Next();
+      continue;
+    }
+    cur_qualifier_ =
+        std::string(remaining.substr(pos1 + 1, pos2 - pos1 - 1));
 
-  size_t pos3 = remaining.find('/', pos2 + 1);
-  if (pos3 == std::string::npos) return false;
-  cur_qualifier_ = std::string(remaining.substr(pos2 + 1, pos3 - pos2 - 1));
-
-  std::string ts_str = std::string(remaining.substr(pos3 + 1));
-  try {
+    std::string ts_str = std::string(remaining.substr(pos2 + 1));
+    try {
       long long ts_val = std::stoll(ts_str);
       cur_timestamp_ = std::chrono::milliseconds(ts_val);
-  } catch (...) {
+    } catch (...) {
       cur_timestamp_ = std::chrono::milliseconds(0);
+    }
+
+    cur_value_ = it_->value().ToString();
+
+    std::cout << "ParseCurrentKey | row=" << cur_row_ << " | family="
+              << cur_family_bare_ << " | qual=" << cur_qualifier_
+              << " | ts=" << ts_str << " | val=" << cur_value_ << "\n";
+
+    // Row range test
+    if (row_ranges_) {
+      bool found = false;
+      StringRangeSet::Range::Value rowv = cur_row_;
+      for (auto const& r : row_ranges_->disjoint_ranges()) {
+        if (r.IsWithin(rowv)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) { it_->Next(); continue; }
+    }
+
+    // Row regexes: if any exist, require at least one match (OR)
+    if (!row_regexes_.empty()) {
+      bool matched = false;
+      for (auto const& rx : row_regexes_) {
+        if (re2::RE2::PartialMatch(cur_row_, *rx)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) { it_->Next(); continue; }
+    }
+
+    // Column range test
+    {
+      bool in_some = false;
+      StringRangeSet::Range::Value vq = cur_qualifier_;
+      for (auto const& r : column_ranges_.disjoint_ranges()) {
+        if (r.IsWithin(vq)) {
+          in_some = true;
+          break;
+        }
+      }
+      if (!in_some) { it_->Next(); continue; }
+    }
+
+    // Column regexes (OR semantics)
+    if (!column_regexes_.empty()) {
+      bool matched = false;
+      for (auto const& rx : column_regexes_) {
+        if (re2::RE2::PartialMatch(cur_qualifier_, *rx)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) { it_->Next(); continue; }
+    }
+
+    // Timestamp ranges
+    {
+      bool in_some = false;
+      for (auto const& r : timestamp_ranges_.disjoint_ranges()) {
+        if (r.IsWithin(cur_timestamp_)) {
+          in_some = true;
+          break;
+        }
+      }
+      if (!in_some) { it_->Next(); continue; }
+    }
+
+    // All filters passed for this key.
+    return true;
   }
 
-  cur_value_ = it_->value().ToString();
-
-  std::cout << "ParseCurrentKey | " << cur_row_ << " | " << cur_family_ << " | " << cur_qualifier_ 
-  << " | " << ts_str << " | " << cur_value_ << "\n";
-
-  return true;
+  // iterator exhausted or invalid
+  return false;
 }
+
 
 }  // namespace emulator
 }  // namespace bigtable

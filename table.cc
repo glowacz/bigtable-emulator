@@ -579,35 +579,51 @@ bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
       !absl::holds_alternative<ColumnRange>(internal_filter)) {
     return MergeCellStreams::ApplyFilter(internal_filter);
   }
-  // internal_filter is either FamilyNameRegex or ColumnRange
+
   for (auto stream_it = unfinished_streams_.begin();
        stream_it != unfinished_streams_.end();) {
-    auto* cf_stream =
-        dynamic_cast<FilteredColumnFamilyStream*>(&(*stream_it)->impl());
-    assert(cf_stream);
 
+    AbstractCellStreamImpl& impl = (*stream_it)->impl();
+
+    // --- obtain column family name (RAM or persistent) ---
+    std::string const* cf_name = nullptr;
+
+    if (auto* ram =
+            dynamic_cast<FilteredColumnFamilyStream*>(&impl)) {
+      cf_name = &ram->column_family_name();
+    } else if (auto* persistent =
+                   dynamic_cast<PersistentFilteredColumnFamilyStream*>(&impl)) {
+      cf_name = &persistent->column_family_name();
+    } else {
+      assert(false && "Unknown column-family stream implementation");
+    }
+
+    // --- prune streams ---
     if ((absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
          !re2::RE2::PartialMatch(
-             cf_stream->column_family_name(),
+             *cf_name,
              *absl::get<FamilyNameRegex>(internal_filter).regex)) ||
         (absl::holds_alternative<ColumnRange>(internal_filter) &&
-         absl::get<ColumnRange>(internal_filter).column_family !=
-             cf_stream->column_family_name())) {
+         absl::get<ColumnRange>(internal_filter).column_family != *cf_name)) {
       stream_it = unfinished_streams_.erase(stream_it);
       continue;
     }
 
-    if (absl::holds_alternative<ColumnRange>(internal_filter) &&
-        absl::get<ColumnRange>(internal_filter).column_family ==
-            cf_stream->column_family_name()) {
-      cf_stream->ApplyFilter(internal_filter);
+    // --- forward ColumnRange only to RAM stream (for now) ---
+    if (absl::holds_alternative<ColumnRange>(internal_filter)) {
+      if (auto* ram =
+              dynamic_cast<FilteredColumnFamilyStream*>(&impl)) {
+        ram->ApplyFilter(internal_filter);
+      }
+      // Persistent stream ignores it for now (correct, not a bug)
     }
 
-    stream_it++;
+    ++stream_it;
   }
 
   return true;
 }
+
 
 // ------------------------------------------------------------------------------------------------------------
 // In-memory
