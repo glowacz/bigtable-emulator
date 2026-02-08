@@ -1185,11 +1185,15 @@ Status RowTransaction::DeleteFromColumn(
 }
 
 Status RowTransaction::DeleteFromRow() {
-    // TODO: probably nothing / remove the commented in-memory implementation
+  // TODO: probably nothing / remove the commented in-memory implementation
   // OR
   // implement own rollback logic
 
   Storage *storage = GetGlobalStorage();
+  if (!storage->RowExists(table_key_, row_key_)) {
+    return NotFoundError("row not found in table",
+                       GCP_ERROR_INFO().WithMetadata("row", row_key_));
+  }
   storage->DeleteRow(table_key_, row_key_);
 
   return Status();
@@ -1236,7 +1240,7 @@ Status RowTransaction::DeleteFromFamily(
                                       delete_from_family.family_name()));
   }
 
-  if (!storage->RowExists(table_key_, row_key_, prefixed_cf_name)) {
+  if (!storage->RowExistsInCF(table_key_, row_key_, prefixed_cf_name)) {
     // The row does not exist
     return NotFoundError(
         "row key is not found in column family",

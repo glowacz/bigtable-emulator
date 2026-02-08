@@ -53,8 +53,11 @@ public:
     bool CFExists(const std::string &prefixed_cf_name);
 
     // Checks if row_key exists in a CF
-    bool RowExists(const std::string& table_name, const std::string& row_key,
+    bool RowExistsInCF(const std::string& table_name, const std::string& row_key,
         const std::string &prefixed_cf_name);
+
+    // Checks if row_key exists
+    bool RowExists(const std::string& table_name, const std::string& row_key);
 
     // Returns an iterator for a specific column family
     rocksdb::Iterator* NewIterator(const std::string& cf_name);

@@ -359,7 +359,7 @@ bool Storage::CFExists(const std::string &prefixed_cf_name) {
     return cf_handles_.find(prefixed_cf_name) != cf_handles_.end();
 }
 
-bool Storage::RowExists(const std::string& table_name, const std::string& row_key,
+bool Storage::RowExistsInCF(const std::string& table_name, const std::string& row_key,
     const std::string &prefixed_cf_name) {
     rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
 
@@ -367,6 +367,22 @@ bool Storage::RowExists(const std::string& table_name, const std::string& row_ke
     std::string end_key = CalculatePrefixEnd(start_key);
 
     return !IsRangeEmpty(handle, start_key, end_key);
+}
+
+bool Storage::RowExists(const std::string& table_name, const std::string& row_key) {
+    // TODO: this is not optimal, because we could iterate only over this table's CFs
+    // (based on prefix or keep separate maps for separate tables)
+    for (const auto& pair : cf_handles_) {
+        rocksdb::ColumnFamilyHandle* handle = pair.second;
+        std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
+        std::string end_key = CalculatePrefixEnd(start_key);
+
+        if (!IsRangeEmpty(handle, start_key, end_key)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 rocksdb::Iterator* Storage::NewIterator(const std::string& cf_name) {
