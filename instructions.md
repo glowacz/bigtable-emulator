@@ -100,3 +100,8 @@ Jest w commicie:
 
 # Czyszczenie całej bazy
 `bazel run //:clear`
+
+# Filtry
+Po uruchomieniu `./populate_db.sh`:
+- cbt -project=p -instance=i read users regex='^user-(001)$'
+- cbt -project=p -instance=i read cars columns=id:brand
