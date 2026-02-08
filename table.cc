@@ -610,15 +610,15 @@ bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
 
 // ------------------------------------------------------------------------------------------------------------
 // In-memory
-// std::vector<CellStream> FilteredTableStream::CreateCellStreams(
-//   std::vector<std::unique_ptr<FilteredColumnFamilyStream>> cf_streams) {
-// std::vector<CellStream> res;
-// res.reserve(cf_streams.size());
-// for (auto& stream : cf_streams) {
-//   res.emplace_back(std::move(stream));
-// }
-// return res;
-// }
+std::vector<CellStream> FilteredTableStream::CreateCellStreams(
+    std::vector<std::unique_ptr<FilteredColumnFamilyStream>> cf_streams) {
+  std::vector<CellStream> res;
+  res.reserve(cf_streams.size());
+  for (auto& stream : cf_streams) {
+    res.emplace_back(std::move(stream));
+  }
+  return res;
+}
 
 // ------------------------------------------------------------------------------------------------------------
 // Persistent
