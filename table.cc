@@ -64,6 +64,7 @@
 
 void store_schema(const google::bigtable::admin::v2::Table& schema) {
   Storage* storage = GetGlobalStorage();
+  if (storage == nullptr) return;
   std::string table_key;
   table_key = kTablesPrefix + schema.name();
   std::string value = schema.SerializeAsString();
