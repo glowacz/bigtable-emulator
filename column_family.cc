@@ -767,8 +767,9 @@ PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
   std::cout << "=======================\nCreated PersistentFilteredColumnFamilyStream for cf " << family << "\n=======================\n";
   table_prefix_ = "/tables/" + table_name + "/";
   std::string prefix = table_name + "/";
-  std::string bare_cf_name = family.substr(family.find(prefix) + prefix.length());
-  cur_family_bare_ = bare_cf_name;
+  auto const pos = family.find(prefix);
+  cur_family_bare_ =
+      pos == std::string::npos ? family : family.substr(pos + prefix.length());
   row_ranges_ = std::make_shared<StringRangeSet const>(StringRangeSet::All());
   column_ranges_ = StringRangeSet::All();
   timestamp_ranges_ = TimestampRangeSet::All();
@@ -814,6 +815,11 @@ bool PersistentFilteredColumnFamilyStream::ApplyFilter(InternalFilter const& int
 
 void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
   if (initialized_) return;
+  if (storage_ == nullptr) {
+    initialized_ = true;
+    has_value_ = false;
+    return;
+  }
 
   std::cout << "\nInitializeIfNeeded was needed for family " << cur_family_  
             << " and table_prefix " << table_prefix_ <<"\n";

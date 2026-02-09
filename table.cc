@@ -180,8 +180,15 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
         "`automated_backup_policy` not empty.",
         GCP_ERROR_INFO().WithMetadata("schema", schema_.DebugString()));
   }
-  store_schema(schema_);
+  auto normalized_schema = schema_;
+  normalized_schema.clear_column_families();
+  std::string const cf_prefix = name_ + "/";
   for (auto const& column_family_def : schema_.column_families()) {
+    auto column_family_id = column_family_def.first;
+    if (absl::StartsWith(column_family_id, cf_prefix)) {
+      column_family_id = column_family_id.substr(cf_prefix.size());
+    }
+
     absl::optional<google::bigtable::admin::v2::Type> opt_value_type =
         absl::nullopt;
     absl::optional<google::bigtable::admin::v2::GcRule> opt_gc_rule =
@@ -202,8 +209,12 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
       return cf.status();
     }
 
-    column_families_.emplace(column_family_def.first, cf.value());
+    (*normalized_schema.mutable_column_families())[column_family_id] =
+        column_family_def.second;
+    column_families_[column_family_id] = cf.value();
   }
+  schema_ = std::move(normalized_schema);
+  store_schema(schema_);
 
   return Status();
 }
@@ -216,7 +227,8 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
   auto new_schema = schema_;
   auto new_column_families = column_families_;
   for (auto const& modification : request.modifications()) {
-    std::string prefixed_cf_id = name_ + "/" + modification.id();
+    auto const& cf_id = modification.id();
+    std::string prefixed_cf_id = name_ + "/" + cf_id;
     if (modification.drop()) {
       if (IsDeleteProtectedNoLock()) {
         return FailedPreconditionError(
@@ -224,22 +236,24 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
             GCP_ERROR_INFO().WithMetadata("modification",
                                           modification.DebugString()));
       }
-      if (new_column_families.erase(prefixed_cf_id) == 0) {
+      if (new_column_families.erase(cf_id) == 0) {
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
       // TODO: maybe handle error
       Storage *storage = GetGlobalStorage();
-      storage->DeleteColumnFamily(prefixed_cf_id);
-      if (new_schema.mutable_column_families()->erase(prefixed_cf_id) == 0) {
+      if (storage != nullptr) {
+        storage->DeleteColumnFamily(prefixed_cf_id);
+      }
+      if (new_schema.mutable_column_families()->erase(cf_id) == 0) {
         return InternalError("Column family with no schema.",
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
     } else if (modification.has_update()) {
       auto& cfs = *new_schema.mutable_column_families();
-      auto cf_it = cfs.find(prefixed_cf_id);
+      auto cf_it = cfs.find(cf_id);
       if (cf_it == cfs.end()) {
         return NotFoundError("No such column family.",
                              GCP_ERROR_INFO().WithMetadata(
@@ -295,12 +309,11 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
           return status;
         }
 
-        auto it = new_column_families.find(prefixed_cf_id);
+        auto it = new_column_families.find(cf_id);
         if (it == new_column_families.end()) {
           return InvalidArgumentError(
               "Attempt to modify Column Family that is not running",
-              GCP_ERROR_INFO().WithMetadata("Column Family",
-                                            prefixed_cf_id));
+              GCP_ERROR_INFO().WithMetadata("Column Family", cf_id));
         }
         it->second->SetGCRule(gc_rule);
       }
@@ -330,14 +343,14 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
       }
       cf = std::move(maybe_cf.value());
 
-      if (!new_column_families.emplace(prefixed_cf_id, cf).second) {
+      if (!new_column_families.emplace(cf_id, cf).second) {
         return AlreadyExistsError(
             "Column family already exists.",
             GCP_ERROR_INFO().WithMetadata("modification",
                                           modification.DebugString()));
       }
       if (!new_schema.mutable_column_families()
-               ->emplace(prefixed_cf_id, modification.create())
+               ->emplace(cf_id, modification.create())
                .second) {
         return InternalError("Column family with schema but no data.",
                              GCP_ERROR_INFO().WithMetadata(
@@ -399,8 +412,11 @@ Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
 template <typename MESSAGE>
 StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
     MESSAGE const& message) const {
-  // auto column_family_it = column_families_.find(message.family_name());
-  auto column_family_it = column_families_.find(name_ + "/" + message.family_name());
+  auto column_family_it = column_families_.find(message.family_name());
+  if (column_family_it == column_families_.end()) {
+    // Backward compatibility for any already-loaded state using prefixed keys.
+    column_family_it = column_families_.find(name_ + "/" + message.family_name());
+  }
   if (column_family_it == column_families_.end()) {
     return NotFoundError(
         "No such column family.",
@@ -531,10 +547,15 @@ StatusOr<CellStream> Table::CreateCellStream(
   auto table_stream_ctor = [range_set = std::move(range_set), this] {
     std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> per_cf_streams;
     per_cf_streams.reserve(column_families_.size());
+    std::string const cf_prefix = name_ + "/";
     for (auto const& column_family : column_families_) {
+      auto storage_cf_name = column_family.first;
+      if (!absl::StartsWith(storage_cf_name, cf_prefix)) {
+        storage_cf_name = cf_prefix + storage_cf_name;
+      }
       std::cout << "BEFORE creating PersistentFilteredColumnFamilyStream\n";
       per_cf_streams.emplace_back(std::make_unique<PersistentFilteredColumnFamilyStream>(
-          name_, column_family.first, ""));
+          name_, storage_cf_name, ""));
       std::cout << "AFTER creating PersistentFilteredColumnFamilyStream\n";
     }
     std::cout << "JUST BEFORE CellStream for vector\n";
@@ -1189,7 +1210,10 @@ Status RowTransaction::DeleteFromColumn(
   // but we'll keep it, because why not
   std::string prefixed_cf_name = table_key_ + "/" + delete_from_column.family_name();
   Storage *storage = GetGlobalStorage();
-  storage->DeleteColumn(table_key_, row_key_, prefixed_cf_name, delete_from_column.column_qualifier());
+  if (storage != nullptr) {
+    storage->DeleteColumn(table_key_, row_key_, prefixed_cf_name,
+                          delete_from_column.column_qualifier());
+  }
 
   for (auto& cell : deleted_cells) {
     RestoreValue restore_value{
@@ -1202,40 +1226,32 @@ Status RowTransaction::DeleteFromColumn(
 }
 
 Status RowTransaction::DeleteFromRow() {
-  // TODO: probably nothing / remove the commented in-memory implementation
-  // OR
-  // implement own rollback logic
+  bool row_existed = false;
+  for (auto& column_family : table_->column_families_) {
+    auto deleted_columns = column_family.second->DeleteRow(row_key_);
+
+    for (auto& column : deleted_columns) {
+      auto const& column_qualifier = column.first;
+      for (auto& cell : column.second) {
+        RestoreValue restore_value = {*column_family.second, column_qualifier,
+                                      cell.timestamp, std::move(cell.value)};
+        undo_.emplace(std::move(restore_value));
+        row_existed = true;
+      }
+    }
+  }
+
+  if (!row_existed) {
+    return NotFoundError("row not found in table",
+                         GCP_ERROR_INFO().WithMetadata("row", row_key_));
+  }
 
   Storage *storage = GetGlobalStorage();
-  if (!storage->RowExists(table_key_, row_key_)) {
-    return NotFoundError("row not found in table",
-                       GCP_ERROR_INFO().WithMetadata("row", row_key_));
+  if (storage != nullptr) {
+    storage->DeleteRow(table_key_, row_key_);
   }
-  storage->DeleteRow(table_key_, row_key_);
 
   return Status();
-
-  // bool row_existed;
-  // for (auto& column_family : table_->column_families_) {
-  //   auto deleted_columns = column_family.second->DeleteRow(row_key_);
-
-  //   for (auto& column : deleted_columns) {
-  //     for (auto& cell : column.second) {
-  //       RestoreValue restrore_value = {*column_family.second,
-  //                                      std::move(column.first), cell.timestamp,
-  //                                      std::move(cell.value)};
-  //       undo_.emplace(std::move(restrore_value));
-  //       row_existed = true;
-  //     }
-  //   }
-  // }
-
-  // if (row_existed) {
-  //   return Status();
-  // }
-
-  // return NotFoundError("row not found in table",
-  //                      GCP_ERROR_INFO().WithMetadata("row", row_key_));
 }
 
 Status RowTransaction::DeleteFromFamily(
@@ -1243,30 +1259,35 @@ Status RowTransaction::DeleteFromFamily(
         delete_from_family) {
   std::cout << "RowTransaction::DeleteFromFamily: Deleting from family " 
     << delete_from_family.family_name() << "\n";
-  // TODO: think if it is good that we deleted the in-memory implementation
-
-  // If the request references an incorrect schema (non-existent
-  // column family) then return a failure status error immediately.  
-  std::string prefixed_cf_name = table_key_ + "/" + delete_from_family.family_name();
-  Storage *storage = GetGlobalStorage();
-
-  if (!storage->CFExists(prefixed_cf_name)) {
-    return NotFoundError(
-        "column family not found in table",
-        GCP_ERROR_INFO().WithMetadata("column family",
-                                      delete_from_family.family_name()));
+  auto maybe_column_family = table_->FindColumnFamily(delete_from_family);
+  if (!maybe_column_family.ok()) {
+    return maybe_column_family.status();
   }
 
-  if (!storage->RowExistsInCF(table_key_, row_key_, prefixed_cf_name)) {
-    // The row does not exist
+  auto& column_family = maybe_column_family->get();
+  auto deleted_columns = column_family.DeleteRow(row_key_);
+  if (deleted_columns.empty()) {
     return NotFoundError(
         "row key is not found in column family",
         GCP_ERROR_INFO()
             .WithMetadata("row key", row_key_)
             .WithMetadata("column family", delete_from_family.family_name()));
   }
-  
-  bool deleted = storage->DeleteCFRow(table_key_, row_key_, prefixed_cf_name);
+
+  for (auto& column : deleted_columns) {
+    auto const& column_qualifier = column.first;
+    for (auto& cell : column.second) {
+      RestoreValue restore_value{column_family, column_qualifier, cell.timestamp,
+                                 std::move(cell.value)};
+      undo_.emplace(std::move(restore_value));
+    }
+  }
+
+  std::string prefixed_cf_name = table_key_ + "/" + delete_from_family.family_name();
+  Storage *storage = GetGlobalStorage();
+  if (storage != nullptr) {
+    storage->DeleteCFRow(table_key_, row_key_, prefixed_cf_name);
+  }
 
   return Status();
 }
@@ -1306,8 +1327,11 @@ Status RowTransaction::SetCell(
     std::cout << "Before PutCell (to Global Storage)\n";
     std::cout << "Table name: " << table_key_ << "\n";
     // storage->PutCell(table_key_, row_key_, set_cell.family_name(), 
-    storage->PutCell(table_key_, row_key_, family_with_table_name, 
-                     set_cell.column_qualifier(), timestamp, set_cell.value());
+    if (storage != nullptr) {
+      storage->PutCell(table_key_, row_key_, family_with_table_name,
+                       set_cell.column_qualifier(), timestamp,
+                       set_cell.value());
+    }
     std::cout << "After PutCell (to Global Storage)\n";
 
   auto maybe_old_value = column_family.SetCell(
