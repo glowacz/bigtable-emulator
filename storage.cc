@@ -398,14 +398,13 @@ bool Storage::IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle,
     // Optimization: Set the upper bound to avoid internal work beyond end_key
     read_options.iterate_upper_bound = &end_key; 
 
-    rocksdb::Iterator* it = db_->NewIterator(read_options, handle);
-
+    std::unique_ptr<rocksdb::Iterator> it(db_->NewIterator(read_options, handle));
     it->Seek(start_key);
 
     if (it->Valid()) {
-    if (it->key().compare(end_key) < 0) {
-    return false;
-    }
+      if (it->key().compare(end_key) < 0) {
+        return false;
+      }
     }
 
     return true;
