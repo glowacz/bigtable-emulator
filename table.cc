@@ -59,7 +59,7 @@
 #include "constants.h"
 
 void store_schema(const google::bigtable::admin::v2::Table& schema) {
-  Storage* storage = GetGlobalStorage();
+  auto* storage = google::cloud::bigtable::emulator::GetGlobalStorage();
   if (storage == nullptr) return;
   std::string table_key;
   table_key = kTablesPrefix + schema.name();
@@ -71,7 +71,7 @@ void store_schema(const google::bigtable::admin::v2::Table& schema) {
     std::istringstream iss(manifest);
     std::string line;
     while (std::getline(iss, line)) {
-      if (Trim(line) == table_key) {
+      if (google::cloud::bigtable::emulator::Trim(line) == table_key) {
         present = true;
         break;
       }

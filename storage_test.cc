@@ -28,6 +28,12 @@
 
 namespace {
 
+namespace bt_emulator = ::google::cloud::bigtable::emulator;
+
+using bt_emulator::CalculatePrefixEnd;
+using bt_emulator::Storage;
+using bt_emulator::Trim;
+
 std::string MakeUniqueDbPath() {
   static std::atomic<int> counter{0};
   auto const id = counter.fetch_add(1);

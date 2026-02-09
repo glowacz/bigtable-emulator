@@ -1,9 +1,15 @@
 #include "storage.h"
 #include "constants.h"
 #include "rocksdb/iterator.h"
+#include <atomic>
 #include <iostream>
-#include <vector>
 #include <sstream>
+#include <vector>
+
+namespace google {
+namespace cloud {
+namespace bigtable {
+namespace emulator {
 
 Storage::Storage(const std::string& db_path) {
     rocksdb::Options options;
@@ -439,3 +445,8 @@ std::string CalculatePrefixEnd(const std::string& prefix) {
     end_key.back()++;
     return end_key;
 }
+
+}  // namespace emulator
+}  // namespace bigtable
+}  // namespace cloud
+}  // namespace google

@@ -1,97 +1,70 @@
 #pragma once
-#include <string>
+#include <chrono>
 #include <memory>
-#include <vector>
-#include <unordered_map>
 #include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 #include "rocksdb/db.h"
 
+namespace google {
+namespace cloud {
+namespace bigtable {
+namespace emulator {
+
 class Storage {
-public:
-    Storage(const std::string& db_path);
-    ~Storage();
+ public:
+  Storage(std::string const& db_path);
+  ~Storage();
 
-    bool PutCell(const std::string& table_name, const std::string& row_key, const std::string& column_family,
-        const std::string& column_qualifier, const std::chrono::milliseconds& timestamp, 
-        const std::string& value);
-        
-    // Basic abstraction for Bigtable "MutateRow" (Uses Default Column Family)
-    bool PutRow(const std::string& row_key, const std::string& value);
-    std::string GetRow(const std::string& row_key);
-    bool DeleteRow(const std::string& row_key);
+  bool PutCell(std::string const& table_name, std::string const& row_key,
+               std::string const& column_family,
+               std::string const& column_qualifier,
+               std::chrono::milliseconds const& timestamp,
+               std::string const& value);
 
-    // Atomic write of several key/value pairs (Uses Default Column Family)
-    bool PutBatch(const std::vector<std::pair<std::string, std::string>>& kvs);
-    
-    // Scans all Column Families and prints data
-    void ScanDatabase(void);
-    
-    // Scans all Column Families for a specific row key
-    void GetRowData(const std::string& table_name, const std::string& row_key);
+  bool PutRow(std::string const& row_key, std::string const& value);
+  std::string GetRow(std::string const& row_key);
+  bool DeleteRow(std::string const& row_key);
 
-    // Deletes the table from the manifest and deletes table contents
-    void DeleteTable(std::string table_name);
+  bool PutBatch(
+      std::vector<std::pair<std::string, std::string>> const& kvs);
+  void ScanDatabase(void);
+  void GetRowData(std::string const& table_name, std::string const& row_key);
+  void DeleteTable(std::string table_name);
+  void DeleteColumnFamiliesForTable(std::string const& table_prefix);
+  void DeleteColumnFamily(std::string const& prefixed_cf_name);
+  void DeleteColumn(std::string const& table_name, std::string const& row_key,
+                    std::string const& prefixed_cf_name,
+                    std::string const& column_name);
+  void DeleteRow(std::string const& table_name, std::string const& row_key);
+  bool DeleteCFRow(std::string const& table_name, std::string const& row_key,
+                   std::string const& prefixed_cf_name);
+  bool CFExists(std::string const& prefixed_cf_name);
+  bool RowExistsInCF(std::string const& table_name, std::string const& row_key,
+                     std::string const& prefixed_cf_name);
+  bool RowExists(std::string const& table_name, std::string const& row_key);
+  rocksdb::Iterator* NewIterator(std::string const& cf_name);
+  bool IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle,
+                    rocksdb::Slice const& start_key,
+                    rocksdb::Slice const& end_key);
 
-    // Deletes all column families (and their data) for table identified by table_prefix
-    void DeleteColumnFamiliesForTable(const std::string& table_prefix);
-
-    // Deletes a column family (and its data)
-    void DeleteColumnFamily(const std::string &prefixed_cf_name);
-
-    // "Deletes the column" - meaning it deletes all data (from all timestamps) of a column from a specific row
-    void DeleteColumn(const std::string& table_name, const std::string& row_key, 
-                    const std::string &prefixed_cf_name, const std::string &column_name);
-    
-    // Deletes a row from a table
-    void DeleteRow(const std::string& table_name, const std::string& row_key);
-
-    // Deletes all cells from a given CF in a given row
-    bool DeleteCFRow(const std::string& table_name, const std::string& row_key,
-        const std::string &prefixed_cf_name);
-    
-    // Checks if this CF exists in a table (table name is already embedded in the prefixed_cf_name)
-    bool CFExists(const std::string &prefixed_cf_name);
-
-    // Checks if row_key exists in a CF
-    bool RowExistsInCF(const std::string& table_name, const std::string& row_key,
-        const std::string &prefixed_cf_name);
-
-    // Checks if row_key exists
-    bool RowExists(const std::string& table_name, const std::string& row_key);
-
-    // Returns an iterator for a specific column family
-    rocksdb::Iterator* NewIterator(const std::string& cf_name);
-    
-    // Checks if there are some cells with a given prefix (e. g. if a row exists in a given table
-    // or a column exists in a given row)
-    bool IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle, 
-        const rocksdb::Slice& start_key, 
-        const rocksdb::Slice& end_key);
-
-private:
-    std::unique_ptr<rocksdb::DB> db_;
-    
-    // Map to store handles for each Column Family
-    std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> cf_handles_;
-    std::mutex cf_mutex_;
-
-    // Helper to retrieve or create a handle
-    rocksdb::ColumnFamilyHandle* GetOrAddHandle(const std::string& cf_name);
+ private:
+  std::unique_ptr<rocksdb::DB> db_;
+  std::unordered_map<std::string, rocksdb::ColumnFamilyHandle*> cf_handles_;
+  std::mutex cf_mutex_;
+  rocksdb::ColumnFamilyHandle* GetOrAddHandle(std::string const& cf_name);
 };
 
-// There will be only one global storage, so we expose API to use it
-
-// Invoked in main only.
 int InitGlobalStorage(char const* path);
-// Returns the storage pointer or nullptr if not initialized.
 Storage* GetGlobalStorage(void);
-// Close / free resources
 void CloseGlobalStorage(void);
-
 int GetNextSchemaIdx();
 void RollbackSchemaIdx();
+std::string Trim(std::string const& s);
+std::string CalculatePrefixEnd(std::string const& prefix);
 
-std::string Trim(const std::string& s);
-
-// Helper to calculate the smallest string strictly greater than all keys starting with 'prefix'
-std::string CalculatePrefixEnd(const std::string& prefix);
+}  // namespace emulator
+}  // namespace bigtable
+}  // namespace cloud
+}  // namespace google

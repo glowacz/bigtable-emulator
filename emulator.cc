@@ -31,6 +31,8 @@ ABSL_FLAG(std::uint16_t, port, 8888,
           "the port to bind to on the local machine");
 
 int main(int argc, char* argv[]) {
+  namespace bt_emulator = ::google::cloud::bigtable::emulator;
+
   absl::SetProgramUsageMessage(
       absl::StrCat("Usage: %s -h <host> -p <port>", argv[0]));
   absl::ParseCommandLine(argc, argv);
@@ -44,11 +46,11 @@ int main(int argc, char* argv[]) {
               << std::endl;
     return 1;
   }
-  if (InitGlobalStorage("test_db") != 0) {
+  if (bt_emulator::InitGlobalStorage("test_db") != 0) {
     fprintf(stderr, "Failed to open DB\n");
     return 1;
   }
-  Storage* storage = GetGlobalStorage();
+  bt_emulator::Storage* storage = bt_emulator::GetGlobalStorage();
   auto& server = maybe_server.value();
   // Read manifest
   std::string manifest = storage->GetRow("/sys/tables/_manifest");
@@ -56,7 +58,7 @@ int main(int argc, char* argv[]) {
     std::istringstream iss(manifest);
     std::string table_key;
     while (std::getline(iss, table_key)) {
-      table_key = Trim(table_key);
+      table_key = bt_emulator::Trim(table_key);
       if (table_key.empty()) continue;
       std::string proto_blob = storage->GetRow(table_key);
       if (proto_blob.empty()) {
@@ -94,6 +96,6 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Server running on port " << server->bound_port() << "\n";
   server->Wait();
-  CloseGlobalStorage();
+  bt_emulator::CloseGlobalStorage();
   return 0;
 }
