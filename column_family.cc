@@ -40,7 +40,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <sstream>
 
 namespace google {
 namespace cloud {
@@ -237,10 +236,6 @@ absl::optional<std::string> ColumnRow::SetCell(
     ret = std::move(cell_it->second);
   }
 
-  // TODO: ROCKSDB HERE
-  Storage* storage = GetGlobalStorage();
-  
-
   cells_[timestamp] = value;
 
   return ret;
@@ -429,7 +424,6 @@ StatusOr<absl::optional<std::string>> ColumnFamilyRow::UpdateCell(
 std::vector<Cell> ColumnFamilyRow::DeleteColumn(
     std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
-  std::cout << "\n\nDeleting column with qualifier " << column_qualifier << "\n\n";
   auto column_it = columns_.find(column_qualifier);
   if (column_it == columns_.end()) {
     return {};
@@ -508,10 +502,6 @@ std::map<std::string, std::vector<Cell>> ColumnFamily::DeleteRow(
 std::vector<Cell> ColumnFamily::DeleteColumn(
     std::string const& row_key, std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
-  std::cout << "Deleting from column " << column_qualifier << " | from row " << row_key << "\n";
-  for (const auto& pair : rows_) {
-    std::cout << pair.first << "\n";
-  }
   auto row_it = rows_.find(row_key);
 
   return DeleteColumn(row_it, column_qualifier, time_range);
@@ -521,9 +511,7 @@ std::vector<Cell> ColumnFamily::DeleteColumn(
     std::map<std::string, ColumnFamilyRow>::iterator row_it,
     std::string const& column_qualifier,
     ::google::bigtable::v2::TimestampRange const& time_range) {
-  std::cout << "ColumnFamily::DeleteColumn with row_it\n";
   if (row_it != rows_.end()) {
-    std::cout << "before ColumnFamilyRow::DeleteColumn\n";
     auto erased_cells =
         row_it->second.DeleteColumn(column_qualifier, time_range);
     if (!row_it->second.HasColumns()) {
@@ -628,7 +616,6 @@ CellView const& FilteredColumnFamilyStream::Value() const {
 }
 
 bool FilteredColumnFamilyStream::Next(NextMode mode) {
-  std::cout << "FilteredColumnFamilyStream::Next\n";
   InitializeIfNeeded();
   cur_value_.reset();
   assert(*row_it_ != rows_.end());
@@ -747,24 +734,14 @@ Status CheckGCRuleIsValid(google::bigtable::admin::v2::GcRule const& rule) {
   return CheckGCRuleTreeHasValidFields(rule);
 }
 
-// =========================================================================================================
-// BEGIN PERSISTENTFILTEREDCOLUMNFAMILYSTREAM
-// =========================================================================================================
-
-// PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
-//     ColumnFamily const& column_family, std::string column_family_name,
-//     std::shared_ptr<StringRangeSet const> row_set)
-//     : column_family_name_(std::move(column_family_name)),
-//       row_ranges_(std::move(row_set)) {}
-
 PersistentFilteredColumnFamilyStream::PersistentFilteredColumnFamilyStream(
-  const std::string& table_name, const std::string& family, const std::string& start_row_key) : 
-    storage_(GetGlobalStorage()), 
-    cur_family_(family), 
-    start_row_key_(start_row_key) {
+    std::string const& table_name, std::string const& family,
+    std::string const& start_row_key)
+    : storage_(GetGlobalStorage()),
+      start_row_key_(start_row_key),
+      cur_family_(family) {
   // Define the prefix specifically for this table
   // Storage format: /tables/<table_name>/<row>/...
-  std::cout << "=======================\nCreated PersistentFilteredColumnFamilyStream for cf " << family << "\n=======================\n";
   table_prefix_ = "/tables/" + table_name + "/";
   std::string prefix = table_name + "/";
   auto const pos = family.find(prefix);
@@ -821,9 +798,6 @@ void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
     return;
   }
 
-  std::cout << "\nInitializeIfNeeded was needed for family " << cur_family_  
-            << " and table_prefix " << table_prefix_ <<"\n";
-
   it_.reset(storage_->NewIterator(cur_family_));
 
   // Build seek key. Prefer explicit start_row_key_; if not set, use earliest
@@ -841,8 +815,6 @@ void PersistentFilteredColumnFamilyStream::InitializeIfNeeded() const {
 
   it_->Seek(search_key);
 
-  std::cout << "InitializeIfNeeded: after seek to " << search_key  << " and before ParseCurrentKey\n";
-
   // Validate the first item
   // We cast away constness here because ParseCurrentKey updates internal buffers
   // which constitute the "logical" read state of the stream.
@@ -858,7 +830,6 @@ bool PersistentFilteredColumnFamilyStream::HasValue() const {
 }
 
 CellView const& PersistentFilteredColumnFamilyStream::Value() const {
-  // std::cout << "PersistentFilteredColumnFamilyStream::Value()\n";
   InitializeIfNeeded();
   if (!current_view_.has_value()) {
       current_view_.emplace(
@@ -880,14 +851,12 @@ bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
   current_view_.reset();
 
   if (mode == NextMode::kCell) {
-    std::cout << cur_family_  << ": PersistentFilteredColumnFamilyStream::Next | kCell\n";
     // Advance once and let ParseCurrentKey() scan forward to the next matching entry
     it_->Next();
     has_value_ = ParseCurrentKey();
     return true; // supports kCell
   }
   else if (mode == NextMode::kColumn) {
-    std::cout << "PersistentFilteredColumnFamilyStream::Next | kColumn\n";
     // Skip until Column Qualifier (or Family/Row) changes
     std::string old_row = cur_row_;
     std::string old_fam = cur_family_;
@@ -907,7 +876,6 @@ bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
     return true;
   } 
   else { 
-    std::cout << "PersistentFilteredColumnFamilyStream::Next | kRow\n";
     // Implicitly NextMode::kRow (or others that act like Row for this simplified logic)
     // Skip until Row changes
     std::string old_row = cur_row_;
@@ -926,14 +894,10 @@ bool PersistentFilteredColumnFamilyStream::Next(NextMode mode) {
 // Helper to parse the raw RocksDB key format:
 // /tables/<table_name>/<row_key>/<column_family>/<column_qualifier>/<timestamp>
 bool PersistentFilteredColumnFamilyStream::ParseCurrentKey() {
-  std::cout << "ParseCurrentKey start\n";
-
   if (!it_) return false;
   // Loop until we find a key that belongs to this table and passes filters.
   while (it_->Valid()) {
     std::string key = it_->key().ToString();
-
-    std::cout << "ParseCurrentKey key is " << key << "\n";
 
     // Ensure we are still within the specific table prefix.
     if (key.rfind(table_prefix_, 0) != 0) {
@@ -968,10 +932,6 @@ bool PersistentFilteredColumnFamilyStream::ParseCurrentKey() {
     }
 
     cur_value_ = it_->value().ToString();
-
-    std::cout << "ParseCurrentKey | row=" << cur_row_ << " | family="
-              << cur_family_bare_ << " | qual=" << cur_qualifier_
-              << " | ts=" << ts_str << " | val=" << cur_value_ << "\n";
 
     // Row range test
     if (row_ranges_) {

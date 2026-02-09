@@ -32,11 +32,7 @@ Storage::Storage(const std::string& db_path) {
 
     if (!status.ok()) {
         std::cerr << "Failed to open RocksDB: " << status.ToString() << std::endl;
-        // In a real app, throw or exit.
-    }
-    else {
-        std::cout << "Opened RocksDB with " << handles.size() << " column families.\n";
-        
+    } else {
         // 3. Map handles to names
         for (size_t i = 0; i < column_families.size(); i++) {
             cf_handles_[column_families[i].name] = handles[i];
@@ -75,7 +71,6 @@ rocksdb::ColumnFamilyHandle* Storage::GetOrAddHandle(const std::string& cf_name)
     }
 
     cf_handles_[cf_name] = handle;
-    std::cout << "Created new Column Family: " << cf_name << "\n";
     return handle;
 }
 
@@ -89,9 +84,6 @@ bool Storage::PutCell(const std::string& table_name, const std::string& row_key,
     // Note: column_family name is removed from the key string because 
     // it is now represented by the physical RocksDB Column Family.
     std::string full_key = "/tables/" + table_name + "/" + row_key + "/" + column_qualifier + "/" + std::to_string(timestamp.count());
-    
-    // Debug print
-    std::cout << "PutCell [" << column_family << "]: " << full_key << " = " << value << "\n";
 
     rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), handle, full_key, value);
     return status.ok();
@@ -195,48 +187,19 @@ void Storage::DeleteTable(std::string table_key) {
         while (std::getline(iss, line)) {
             if (Trim(line) != table_key_to_remove) {
             new_manifest += line;
-            new_manifest.push_back('\n'); // Maintain newline format
+            new_manifest.push_back('\n');
             } else {
-            changed = true; // We found and skipped the target key
+            changed = true;
             }
         }
     }
 
-    // std::cout << "Old manifest was: " << manifest << "\n";
-    // std::cout << "New manifest is: " << new_manifest << "\n";
-
     if (changed) {
-        // Save manifest with this table deleted
         PutRow(kManifestKey, new_manifest);
 
-        // delete column families
         DeleteColumnFamiliesForTable(table_key + "/");
 
-        std::string start_key = "/tables/" + table_key + "/";
-
-        // // Delete cell values - now deleting column families handles that
-
-        // std::cout << "Deleting all cells with prefix " << start_key << "\n";
-        
-        // std::string end_key = CalculatePrefixEnd(start_key);
-
-        // rocksdb::WriteBatch batch;
-        
-        // for (const auto& pair : cf_handles_) {
-        //     rocksdb::ColumnFamilyHandle* handle = pair.second;
-        //     std::cout << "===================================\nDeleting all cells for column family " << pair.first << "\n===================================\n";
-        //     batch.DeleteRange(handle, start_key, end_key);
-        // }
-        
-        // batch.DeleteRange(db_->DefaultColumnFamily(), start_key, end_key);
-
-        // rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
-
-        // Delete the persisted schema
-        std::cout << "Deleting the persisted schema under key: " << start_key << "\n";
         DeleteRow(table_key_to_remove);
-
-        // // return status.ok();
     }
 }
 
@@ -244,48 +207,43 @@ void Storage::DeleteColumnFamiliesForTable(const std::string& table_prefix) {
     std::lock_guard<std::mutex> lock(cf_mutex_);
     std::vector<std::string> cfs_to_remove;
 
-    // 1. Identify Column Families that match the prefix
     for (const auto& pair : cf_handles_) {
         const std::string& name = pair.first;
-        
-        // Safety: Never drop the default column family
+
         if (name == rocksdb::kDefaultColumnFamilyName) {
             continue;
         }
 
-        // Check if name starts with prefix
         if (name.size() >= table_prefix.size() && 
             name.compare(0, table_prefix.size(), table_prefix) == 0) {
             cfs_to_remove.push_back(name);
         }
     }
 
-    // 2. Drop and Destroy handles
     for (const auto& name : cfs_to_remove) {
         DeleteColumnFamily(name);
     }
 }
 
 void Storage::DeleteColumnFamily(const std::string &prefixed_cf_name) {
-    rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
-        
-    std::cout << "Dropping Column Family: " << prefixed_cf_name << "\n";
-    
-    // Drop the Column Family from RocksDB (persisted deletion)
+    auto it = cf_handles_.find(prefixed_cf_name);
+    if (it == cf_handles_.end()) {
+        return;
+    }
+    rocksdb::ColumnFamilyHandle* handle = it->second;
+
     rocksdb::Status status = db_->DropColumnFamily(handle);
     if (!status.ok()) {
         std::cerr << "Failed to drop Column Family '" << prefixed_cf_name << "': " << status.ToString() << "\n";
         return;
     }
 
-    // Destroy the in-memory handle object
     status = db_->DestroyColumnFamilyHandle(handle);
     if (!status.ok()) {
         std::cerr << "Failed to destroy handle for '" << prefixed_cf_name << "': " << status.ToString() << "\n";
     }
 
-    // Remove from our internal map
-    cf_handles_.erase(prefixed_cf_name);
+    cf_handles_.erase(it);
 }
 
 void Storage::DeleteColumn(const std::string& table_name, const std::string& row_key, 
@@ -295,35 +253,33 @@ void Storage::DeleteColumn(const std::string& table_name, const std::string& row
 
     rocksdb::ColumnFamilyHandle* handle = cf_handles_[prefixed_cf_name];
     rocksdb::WriteBatch batch;
-        
-    std::cout << "\nDeleteColumn: Deleting all cells from\n" << start_key << " to\n" << end_key << "\nin CF " << prefixed_cf_name
-            << "\n===================================\n\n";
+
     batch.DeleteRange(handle, start_key, end_key);
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+    if (!status.ok()) {
+        std::cerr << "DeleteColumn failed for '" << prefixed_cf_name
+                  << "': " << status.ToString() << "\n";
+    }
 }
 
 void Storage::DeleteRow(const std::string& table_name, const std::string& row_key) {
     std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
     std::string end_key = CalculatePrefixEnd(start_key);
 
-    std::cout << "\nDeleteRow: Deleting all cells from\n" << start_key << " to\n" << end_key
-    << "\n===================================\n\n";
-
     rocksdb::WriteBatch batch;
     for (const auto& pair : cf_handles_) {
-        std::string cf_name = pair.first;
         rocksdb::ColumnFamilyHandle* handle = pair.second;
         batch.DeleteRange(handle, start_key, end_key);
     }
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
+    if (!status.ok()) {
+        std::cerr << "DeleteRow failed for row '" << row_key
+                  << "': " << status.ToString() << "\n";
+    }
 }
 
 bool Storage::DeleteCFRow(const std::string& table_name, const std::string& row_key,
         const std::string &prefixed_cf_name) {
-    // This should be enough protection against concurrency issues
-    // If the row was deleted before we delete from it below
-    // then we just won't delete anything
-    
     rocksdb::ColumnFamilyHandle* handle;
     auto it = cf_handles_.find(prefixed_cf_name);
     if (it != cf_handles_.end()) {
@@ -335,22 +291,14 @@ bool Storage::DeleteCFRow(const std::string& table_name, const std::string& row_
     std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
     std::string end_key = CalculatePrefixEnd(start_key);
 
-    // if (IsRangeEmpty(handle, start_key, end_key)) {
-    //     std::cout << "\nDeleteCFRow: There was nothing between\n" << start_key << " and\n" << end_key
-    //         << " in CF\n" << prefixed_cf_name << "\n===================================\n\n";
-        
-    //     return false;
-    // }
-
-    std::cout << "\nDeleteCFRow: Deleting all cells from\n" << start_key << " to\n" << end_key
-        << " in CF\n" << prefixed_cf_name << "\n===================================\n\n";
-
     rocksdb::WriteBatch batch;
-    
-    
     batch.DeleteRange(handle, start_key, end_key);
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
-    std::cout << "Status is " << status.code() << "\n";
+    if (!status.ok()) {
+        std::cerr << "DeleteCFRow failed for '" << prefixed_cf_name
+                  << "': " << status.ToString() << "\n";
+        return false;
+    }
 
     return true;
 }
@@ -370,8 +318,6 @@ bool Storage::RowExistsInCF(const std::string& table_name, const std::string& ro
 }
 
 bool Storage::RowExists(const std::string& table_name, const std::string& row_key) {
-    // TODO: this is not optimal, because we could iterate only over this table's CFs
-    // (based on prefix or keep separate maps for separate tables)
     for (const auto& pair : cf_handles_) {
         rocksdb::ColumnFamilyHandle* handle = pair.second;
         std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
@@ -410,30 +356,30 @@ bool Storage::IsRangeEmpty(rocksdb::ColumnFamilyHandle* handle,
     return true;
 }
 
-static Storage *g_storage = NULL;
+static Storage* g_storage = nullptr;
 static pthread_once_t g_storage_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t g_storage_mu = PTHREAD_MUTEX_INITIALIZER;
-static char *g_storage_db_name = NULL;
+static char* g_storage_db_name = nullptr;
 std::atomic<int> idx{0};
 
 static void init_storage_once(void) {
-  if (g_storage_db_name == NULL) {
+  if (g_storage_db_name == nullptr) {
     return;
   }
   g_storage = new Storage(g_storage_db_name);
 }
 
-int InitGlobalStorage(const char *db_name) {
-  if (db_name == NULL) return -1;
+int InitGlobalStorage(char const* db_name) {
+  if (db_name == nullptr) return -1;
   pthread_mutex_lock(&g_storage_mu);
-  if (g_storage != NULL) {
+  if (g_storage != nullptr) {
     // already initialized
     pthread_mutex_unlock(&g_storage_mu);
     return 0;
   }
 
   g_storage_db_name = strdup(db_name);
-  if (g_storage_db_name == NULL) {
+  if (g_storage_db_name == nullptr) {
     pthread_mutex_unlock(&g_storage_mu);
     return -1;
   }
@@ -443,7 +389,7 @@ int InitGlobalStorage(const char *db_name) {
   return rc;
 }
 
-Storage *GetGlobalStorage(void) {
+Storage* GetGlobalStorage(void) {
   return g_storage;
 }
 
@@ -451,22 +397,20 @@ void CloseGlobalStorage(void) {
   pthread_mutex_lock(&g_storage_mu);
   if (g_storage) {
     delete g_storage;
-    g_storage = NULL;
+    g_storage = nullptr;
   }
   if (g_storage_db_name) {
     free(g_storage_db_name);
-    g_storage_db_name = NULL;
+    g_storage_db_name = nullptr;
   }
   pthread_mutex_unlock(&g_storage_mu);
 }
 
-int GetNextSchemaIdx()
-{
+int GetNextSchemaIdx() {
     return idx++;
 }
 
-void RollbackSchemaIdx()
-{
+void RollbackSchemaIdx() {
     idx--;
 }
 
@@ -478,7 +422,6 @@ std::string Trim(const std::string& s) {
   return s.substr(a, b - a);
 }
 
-// Helper to calculate the smallest string strictly greater than all keys starting with 'prefix'
 std::string CalculatePrefixEnd(const std::string& prefix) {
     std::string end_key = prefix;
     // Strip trailing 0xFF bytes as they cannot be incremented

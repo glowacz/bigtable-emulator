@@ -81,17 +81,16 @@ private:
 
 // There will be only one global storage, so we expose API to use it
 
-// invoked in main only
-int InitGlobalStorage(const char *path);
-// Returns the Storage pointer or NULL if not initialized
-Storage *GetGlobalStorage(void);
+// Invoked in main only.
+int InitGlobalStorage(char const* path);
+// Returns the storage pointer or nullptr if not initialized.
+Storage* GetGlobalStorage(void);
 // Close / free resources
 void CloseGlobalStorage(void);
 
 int GetNextSchemaIdx();
 void RollbackSchemaIdx();
 
-// helper function, this should not be here, to be moved to different header in future 
 std::string Trim(const std::string& s);
 
 // Helper to calculate the smallest string strictly greater than all keys starting with 'prefix'

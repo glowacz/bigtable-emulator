@@ -49,18 +49,13 @@ std::string const kStrippedValue;
 }  // namespace
 
 void CellStream::Next(NextMode mode) {
-  std::cout << "=========================================================================================\n";
   if (impl_->Next(mode)) {
-    std::cout << "CellStream::Next | mode default ||| this (and === above)"
-                 " printing 2 times in a row is normal, it also happens in the original emulator\n";
     return;
   }
   if (mode == NextMode::kColumn) {
-    std::cout << "CellStream::Next | mode kColumn\n";
     EmulateNextColumn();
     return;
   }
-  std::cout << "CellStream::Next | mode kRow\n";
   assert(mode == NextMode::kRow);
   EmulateNextRow();
 }
@@ -231,9 +226,7 @@ class TrivialTransformer : public AbstractCellStreamImpl {
   }
 
   bool Next(NextMode mode) override {
-    std::cout << "hello BEFORE next in in impl\n";
     source_.Next(mode);
-    std::cout << "hello after next in in impl\n";
     transformed_.reset();
     return true;
   }

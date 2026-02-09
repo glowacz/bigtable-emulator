@@ -47,7 +47,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <ostream>
 #include <stack>
 #include <string>
 #include <thread>
@@ -58,9 +57,6 @@
 #include <sstream>
 #include "storage.h"
 #include "constants.h"
-
-// static const std::string kTablesPrefix = "/sys/tables/";
-// static const std::string kManifestKey = "/sys/tables/_manifest";
 
 void store_schema(const google::bigtable::admin::v2::Table& schema) {
   Storage* storage = GetGlobalStorage();
@@ -85,9 +81,6 @@ void store_schema(const google::bigtable::admin::v2::Table& schema) {
   std::vector<std::pair<std::string, std::string>> batch;
   batch.emplace_back(table_key, value);
 
-  // std::cout << "====================================================================\n";
-  std::cout << "Storing schema " << table_key << ": " << value << "\n";
-
   if (!present) {
     std::string new_manifest = manifest;
     if (!new_manifest.empty() && new_manifest.back() != '\n') new_manifest.push_back('\n');
@@ -98,8 +91,6 @@ void store_schema(const google::bigtable::admin::v2::Table& schema) {
 
   if (!storage->PutBatch(batch)) {
     std::cerr << "Failed to persist schema for key: " << table_key << std::endl;
-  } else {
-    std::cout << "Persisted schema: " << table_key << std::endl;
   }
 }
 
@@ -136,7 +127,6 @@ void Table::StartGCThreadOnce() {
 
 StatusOr<std::shared_ptr<Table>> Table::Create(
     google::bigtable::admin::v2::Table schema) {
-  std::cout << "Table::Create with name " << schema.name() << "\n";
   std::shared_ptr<Table> res(new Table);
   auto status = res->Construct(std::move(schema));
   if (!status.ok()) {
@@ -152,7 +142,6 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
   // that luxury here, so we need to make sure that the changes performed in
   // this member function are reflected in other threads. The simplest way to do
   // this is the mutex.
-  std::cout << "Table::Construct()\n";
   std::lock_guard<std::mutex> lock(mu_);
   name_ = schema.name();
   schema_ = std::move(schema);
@@ -222,7 +211,6 @@ Status Table::Construct(google::bigtable::admin::v2::Table schema) {
 // NOLINTBEGIN(readability-function-cognitive-complexity)
 StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
     btadmin::ModifyColumnFamiliesRequest const& request) {
-  std::cout << "Modify column families: " << request.DebugString() << std::endl;
   std::unique_lock<std::mutex> lock(mu_);
   auto new_schema = schema_;
   auto new_column_families = column_families_;
@@ -241,8 +229,7 @@ StatusOr<btadmin::Table> Table::ModifyColumnFamilies(
                              GCP_ERROR_INFO().WithMetadata(
                                  "modification", modification.DebugString()));
       }
-      // TODO: maybe handle error
-      Storage *storage = GetGlobalStorage();
+      Storage* storage = GetGlobalStorage();
       if (storage != nullptr) {
         storage->DeleteColumnFamily(prefixed_cf_id);
       }
@@ -379,8 +366,6 @@ google::bigtable::admin::v2::Table Table::GetSchema() const {
 
 Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
                      google::protobuf::FieldMask const& to_update) {
-  std::cout << "Update schema: " << new_schema.DebugString()
-            << " mask: " << to_update.DebugString() << std::endl;
   using google::protobuf::util::FieldMaskUtil;
   google::protobuf::FieldMask allowed_mask;
   FieldMaskUtil::FromString(
@@ -408,7 +393,7 @@ Status Table::Update(google::bigtable::admin::v2::Table const& new_schema,
   store_schema(schema_);
   return Status();
 }
-// no effect on rocksdb
+
 template <typename MESSAGE>
 StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
     MESSAGE const& message) const {
@@ -424,7 +409,7 @@ StatusOr<std::reference_wrapper<ColumnFamily>> Table::FindColumnFamily(
   }
   return std::ref(*column_family_it->second);
 }
-// will have to change row in rocksdb
+
 Status Table::MutateRow(google::bigtable::v2::MutateRowRequest const& request) {
   std::lock_guard<std::mutex> lock(mu_);
 
@@ -437,8 +422,6 @@ Status Table::DoMutationsWithPossibleRollback(
     std::string const& row_key,
     google::protobuf::RepeatedPtrField<google::bigtable::v2::Mutation> const&
         mutations) {
-  std::cout << "DoMutationsWithPossibleRollback\n";
-    
   if (row_key.size() > kMaxRowLen) {
     return InvalidArgumentError(
         "The row_key is longer than 4KiB",
@@ -446,14 +429,10 @@ Status Table::DoMutationsWithPossibleRollback(
                                       absl::StrFormat("%zu", row_key.size())));
   }
 
-  std::cout << "DoMutationsWithPossibleRollback: BEFORE getting table name\n";
-  // const std::string &table_name = this->get()->GetSchema().name();
-  std::cout << "DoMutationsWithPossibleRollback: AFTER getting table name\n";  
   RowTransaction row_transaction(this->get(), row_key, name_);
 
   for (auto const& mutation : mutations) {
     if (mutation.has_set_cell()) {
-      std::cout << "mutation has set_cell\n";
       auto const& set_cell = mutation.set_cell();
 
       absl::optional<std::chrono::milliseconds> timestamp_override =
@@ -471,7 +450,6 @@ Status Table::DoMutationsWithPossibleRollback(
                 std::chrono::system_clock::now().time_since_epoch()));
       }
 
-      std::cout << "Before SetCell\n";
       auto status = row_transaction.SetCell(set_cell, timestamp_override);
       if (!status.ok()) {
         return status;
@@ -539,8 +517,6 @@ Status Table::DoMutationsWithPossibleRollback(
 }
 // NOLINTEND(readability-function-cognitive-complexity)
 
-// ------------------------------------------------------------------------------------------------------------
-// Persistent
 StatusOr<CellStream> Table::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
@@ -564,12 +540,9 @@ StatusOr<CellStream> Table::CreateCellStream(
       if (!absl::StartsWith(storage_cf_name, cf_prefix)) {
         storage_cf_name = cf_prefix + storage_cf_name;
       }
-      std::cout << "BEFORE creating PersistentFilteredColumnFamilyStream\n";
       per_cf_streams.emplace_back(std::make_unique<PersistentFilteredColumnFamilyStream>(
           name_, storage_cf_name, ""));
-      std::cout << "AFTER creating PersistentFilteredColumnFamilyStream\n";
     }
-    std::cout << "JUST BEFORE CellStream for vector\n";
     return CellStream(
         std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
   };
@@ -578,33 +551,8 @@ StatusOr<CellStream> Table::CreateCellStream(
     return CreateFilter(maybe_row_filter.value(), table_stream_ctor);
   }
 
-  std::cout << "Before calling lambda\n";
-
   return table_stream_ctor();
 }
-
-// ------------------------------------------------------------------------------------------------------------
-// In memory
-// StatusOr<CellStream> Table::CreateCellStream(
-//   std::shared_ptr<StringRangeSet> range_set,
-//   absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
-//   auto table_stream_ctor = [range_set = std::move(range_set), this] {
-//     std::vector<std::unique_ptr<FilteredColumnFamilyStream>> per_cf_streams;
-//     per_cf_streams.reserve(column_families_.size());
-//     for (auto const& column_family : column_families_) {
-//       per_cf_streams.emplace_back(std::make_unique<FilteredColumnFamilyStream>(
-//           *column_family.second, column_family.first, range_set));
-//     }
-//     return CellStream(
-//         std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
-//   };
-
-//   if (maybe_row_filter.has_value()) {
-//     return CreateFilter(maybe_row_filter.value(), table_stream_ctor);
-//   }
-
-//   return table_stream_ctor();
-// }
 
 bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
   if (!absl::holds_alternative<FamilyNameRegex>(internal_filter) &&
@@ -655,10 +603,6 @@ bool FilteredTableStream::ApplyFilter(InternalFilter const& internal_filter) {
 
   return true;
 }
-
-
-// ------------------------------------------------------------------------------------------------------------
-// In-memory
 std::vector<CellStream> FilteredTableStream::CreateCellStreams(
     std::vector<std::unique_ptr<FilteredColumnFamilyStream>> cf_streams) {
   std::vector<CellStream> res;
@@ -669,11 +613,8 @@ std::vector<CellStream> FilteredTableStream::CreateCellStreams(
   return res;
 }
 
-// ------------------------------------------------------------------------------------------------------------
-// Persistent
 std::vector<CellStream> FilteredTableStream::CreateCellStreams(
     std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> cf_streams) {
-  std::cout << "============= CreateCellStreams =============\n";
   std::vector<CellStream> res;
   res.reserve(cf_streams.size());
   for (auto& stream : cf_streams) {
@@ -789,7 +730,6 @@ Table::CheckAndMutateRow(
 
 Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
                        RowStreamer& row_streamer) const {
-  std::cout << "ReadRows start\n";
   std::shared_ptr<StringRangeSet> row_set;
   // We need to check that, not only do we have rows, but that it is
   // not empty (i.e. at least one of row_range or rows is specified).
@@ -806,14 +746,11 @@ Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
   }
   std::lock_guard<std::mutex> lock(mu_);
 
-  std::cout << "Before creating CellStream\n";
   StatusOr<CellStream> maybe_stream;
   if (request.has_filter()) {
     maybe_stream = CreateCellStream(row_set, std::move(request.filter()));
-    std::cout << "After creating CellStream WITH filter\n";
   } else {
     maybe_stream = CreateCellStream(row_set, absl::nullopt);
-    std::cout << "After creating CellStream WITHOUT filter\n";
   }
 
   if (!maybe_stream) {
@@ -823,17 +760,8 @@ Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
   std::int64_t rows_count = 0;
   absl::optional<std::string> current_row_key;
 
-  std::cout << "Before iterating over CellStream\n";
   CellStream& stream = *maybe_stream;
   for (; stream; ++stream) {
-    std::cout << "Row: " << stream->row_key()
-              << " column_family: " << stream->column_family()
-              << " column_qualifier: " << stream->column_qualifier()
-              << " column_timestamp: " << stream->timestamp().count()
-              << " column_value: " << stream->value() << " label: "
-              << (stream->HasLabel() ? stream->label() : std::string("unset"))
-              << std::endl;
-
     if (request.rows_limit() > 0) {
       if (!current_row_key.has_value() ||
           stream->row_key() != current_row_key.value()) {
@@ -847,16 +775,13 @@ Status Table::ReadRows(google::bigtable::v2::ReadRowsRequest const& request,
     }
 
     if (!row_streamer.Stream(*stream)) {
-      std::cout << "HOW?" << std::endl;
       return AbortedError("Stream closed by the client.", GCP_ERROR_INFO());
     }
   }
 
   if (!row_streamer.Flush(true)) {
-    std::cout << "Flush failed?" << std::endl;
     return AbortedError("Stream closed by the client.", GCP_ERROR_INFO());
   }
-  std::cout << "Print stop" << std::endl;
   return Status();
 }
 
@@ -1058,7 +983,6 @@ Table::ReadModifyWriteRow(
 
   std::lock_guard<std::mutex> lock(mu_);
 
-  // TODO: table name needed here?
   RowTransaction row_transaction(this->get(), request.row_key());
 
   auto maybe_response = row_transaction.ReadModifyWriteRow(request);
@@ -1178,7 +1102,6 @@ Status RowTransaction::MergeToCell(
 Status RowTransaction::DeleteFromColumn(
     ::google::bigtable::v2::Mutation_DeleteFromColumn const&
         delete_from_column) {
-  std::cout << "Deleting from column " << delete_from_column.column_qualifier() << " | from family " << delete_from_column.family_name() << "\n";
   auto maybe_column_family = table_->FindColumnFamily(delete_from_column);
   if (!maybe_column_family.ok()) {
     return maybe_column_family.status();
@@ -1213,14 +1136,9 @@ Status RowTransaction::DeleteFromColumn(
   auto deleted_cells = column_family.DeleteColumn(
       row_key_, delete_from_column.column_qualifier(),
       delete_from_column.time_range());
-  
-  // TODO: probably nothing
-  // just wanted to note that the above call to the in-memory implementation 
-  // returns nothing if this row/column was created before restarting the emulator
-  // but we will actually delete sth from storage below; so restore_value wouldn't make sense in such case
-  // but we'll keep it, because why not
+
   std::string prefixed_cf_name = table_key_ + "/" + delete_from_column.family_name();
-  Storage *storage = GetGlobalStorage();
+  Storage* storage = GetGlobalStorage();
   if (storage != nullptr) {
     storage->DeleteColumn(table_key_, row_key_, prefixed_cf_name,
                           delete_from_column.column_qualifier());
@@ -1257,7 +1175,7 @@ Status RowTransaction::DeleteFromRow() {
                          GCP_ERROR_INFO().WithMetadata("row", row_key_));
   }
 
-  Storage *storage = GetGlobalStorage();
+  Storage* storage = GetGlobalStorage();
   if (storage != nullptr) {
     storage->DeleteRow(table_key_, row_key_);
   }
@@ -1268,8 +1186,6 @@ Status RowTransaction::DeleteFromRow() {
 Status RowTransaction::DeleteFromFamily(
     ::google::bigtable::v2::Mutation_DeleteFromFamily const&
         delete_from_family) {
-  std::cout << "RowTransaction::DeleteFromFamily: Deleting from family " 
-    << delete_from_family.family_name() << "\n";
   auto maybe_column_family = table_->FindColumnFamily(delete_from_family);
   if (!maybe_column_family.ok()) {
     return maybe_column_family.status();
@@ -1295,7 +1211,7 @@ Status RowTransaction::DeleteFromFamily(
   }
 
   std::string prefixed_cf_name = table_key_ + "/" + delete_from_family.family_name();
-  Storage *storage = GetGlobalStorage();
+  Storage* storage = GetGlobalStorage();
   if (storage != nullptr) {
     storage->DeleteCFRow(table_key_, row_key_, prefixed_cf_name);
   }
@@ -1314,36 +1230,20 @@ Status RowTransaction::SetCell(
     return maybe_column_family.status();
   }
 
-  
   auto& column_family = maybe_column_family->get();
-  
+
   auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::microseconds(set_cell.timestamp_micros()));
-    
-    if (timestamp_override.has_value()) {
-      timestamp = timestamp_override.value();
-    }
-    
-    // ROCKSDB 
-    // set_cell.family_name();
-    // row_key_;
-    // set_cell.column_qualifier();
-    // timestamp;
-    // set_cell.value();
+      std::chrono::microseconds(set_cell.timestamp_micros()));
+  if (timestamp_override.has_value()) {
+    timestamp = timestamp_override.value();
+  }
 
-    std::string family_with_table_name = table_key_ + "/" + set_cell.family_name();
-
-    std::cout << "Before GetGlobalStorage\n";
-    Storage *storage = GetGlobalStorage();
-    std::cout << "Before PutCell (to Global Storage)\n";
-    std::cout << "Table name: " << table_key_ << "\n";
-    // storage->PutCell(table_key_, row_key_, set_cell.family_name(), 
-    if (storage != nullptr) {
-      storage->PutCell(table_key_, row_key_, family_with_table_name,
-                       set_cell.column_qualifier(), timestamp,
-                       set_cell.value());
-    }
-    std::cout << "After PutCell (to Global Storage)\n";
+  std::string family_with_table_name = table_key_ + "/" + set_cell.family_name();
+  Storage* storage = GetGlobalStorage();
+  if (storage != nullptr) {
+    storage->PutCell(table_key_, row_key_, family_with_table_name,
+                     set_cell.column_qualifier(), timestamp, set_cell.value());
+  }
 
   auto maybe_old_value = column_family.SetCell(
       row_key_, set_cell.column_qualifier(), timestamp, set_cell.value());
@@ -1489,7 +1389,7 @@ void RowTransaction::Undo() {
 
     auto* delete_value = absl::get_if<DeleteValue>(&op);
     if (delete_value) {
-      // TODO: probably should add persistence to DeleteTimeStamp
+      // TODO(#persistency): mirror DeleteTimeStamp rollback into persistent storage.
       delete_value->column_family.DeleteTimeStamp(
           row_key, std::move(delete_value->column_qualifier),
           delete_value->timestamp);

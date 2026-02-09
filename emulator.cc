@@ -44,12 +44,11 @@ int main(int argc, char* argv[]) {
               << std::endl;
     return 1;
   }
-  // retrieve
   if (InitGlobalStorage("test_db") != 0) {
     fprintf(stderr, "Failed to open DB\n");
     return 1;
   }
-  Storage *storage = GetGlobalStorage();
+  Storage* storage = GetGlobalStorage();
   auto& server = maybe_server.value();
   // Read manifest
   std::string manifest = storage->GetRow("/sys/tables/_manifest");
@@ -89,16 +88,12 @@ int main(int argc, char* argv[]) {
                   << attach_status << " name=" << schema.name() << std::endl;
         continue;
       }
-      std::cout << "Loaded persisted table: " << schema.name() << std::endl;
 
     }
   }
 
-  storage->ScanDatabase();
-  // storage->GetRowData("row1");
-
   std::cout << "Server running on port " << server->bound_port() << "\n";
   server->Wait();
-  CloseGlobalStorage(); // will never reach here anyway
+  CloseGlobalStorage();
   return 0;
 }
