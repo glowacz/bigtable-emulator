@@ -545,6 +545,17 @@ StatusOr<CellStream> Table::CreateCellStream(
     std::shared_ptr<StringRangeSet> range_set,
     absl::optional<google::bigtable::v2::RowFilter> maybe_row_filter) const {
   auto table_stream_ctor = [range_set = std::move(range_set), this] {
+    if (GetGlobalStorage() == nullptr) {
+      std::vector<std::unique_ptr<FilteredColumnFamilyStream>> per_cf_streams;
+      per_cf_streams.reserve(column_families_.size());
+      for (auto const& column_family : column_families_) {
+        per_cf_streams.emplace_back(std::make_unique<FilteredColumnFamilyStream>(
+            *column_family.second, column_family.first, range_set));
+      }
+      return CellStream(
+          std::make_unique<FilteredTableStream>(std::move(per_cf_streams)));
+    }
+
     std::vector<std::unique_ptr<PersistentFilteredColumnFamilyStream>> per_cf_streams;
     per_cf_streams.reserve(column_families_.size());
     std::string const cf_prefix = name_ + "/";
