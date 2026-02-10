@@ -1080,7 +1080,8 @@ Status RowTransaction::AddToCell(
   }
 
   if (!maybe_old_value.value()) {
-    DeleteValue delete_value{cf, std::move(column_qualifier), ts_ms};
+    DeleteValue delete_value{cf, add_to_cell.family_name(),
+                             std::move(column_qualifier), ts_ms};
     undo_.emplace(std::move(delete_value));
   } else {
     RestoreValue restore_value{cf, std::move(column_qualifier), ts_ms,
@@ -1249,7 +1250,7 @@ Status RowTransaction::SetCell(
       row_key_, set_cell.column_qualifier(), timestamp, set_cell.value());
 
   if (!maybe_old_value) {
-    DeleteValue delete_value{column_family,
+    DeleteValue delete_value{column_family, set_cell.family_name(),
                              std::move(set_cell.column_qualifier()), timestamp};
     undo_.emplace(std::move(delete_value));
   } else {
@@ -1280,8 +1281,8 @@ void ProcessReadModifyWriteResult(
     undo.emplace(std::move(restore_value));
   } else {
     // We created a new cell -- we would need to delete it in any rollback
-    DeleteValue delete_value{column_family, rule.column_qualifier(),
-                             result.timestamp};
+    DeleteValue delete_value{column_family, rule.family_name(),
+                             rule.column_qualifier(), result.timestamp};
     undo.emplace(std::move(delete_value));
   }
 
@@ -1389,10 +1390,15 @@ void RowTransaction::Undo() {
 
     auto* delete_value = absl::get_if<DeleteValue>(&op);
     if (delete_value) {
-      // TODO(#persistency): mirror DeleteTimeStamp rollback into persistent storage.
+      auto* storage = GetGlobalStorage();
+      if (storage != nullptr && !table_key_.empty()) {
+        storage->DeleteCell(table_key_, row_key,
+                            table_key_ + "/" + delete_value->family_name,
+                            delete_value->column_qualifier,
+                            delete_value->timestamp);
+      }
       delete_value->column_family.DeleteTimeStamp(
-          row_key, std::move(delete_value->column_qualifier),
-          delete_value->timestamp);
+          row_key, delete_value->column_qualifier, delete_value->timestamp);
       continue;
     }
 

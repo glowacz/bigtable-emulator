@@ -176,6 +176,7 @@ struct RestoreValue {
 
 struct DeleteValue {
   ColumnFamily& column_family;
+  std::string family_name;
   std::string column_qualifier;
   std::chrono::milliseconds timestamp;
 };

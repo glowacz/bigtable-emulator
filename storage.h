@@ -37,6 +37,10 @@ class Storage {
   void DeleteColumn(std::string const& table_name, std::string const& row_key,
                     std::string const& prefixed_cf_name,
                     std::string const& column_name);
+  bool DeleteCell(std::string const& table_name, std::string const& row_key,
+                  std::string const& prefixed_cf_name,
+                  std::string const& column_name,
+                  std::chrono::milliseconds const& timestamp);
   void DeleteRow(std::string const& table_name, std::string const& row_key);
   bool DeleteCFRow(std::string const& table_name, std::string const& row_key,
                    std::string const& prefixed_cf_name);

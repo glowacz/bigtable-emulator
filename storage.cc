@@ -268,6 +268,30 @@ void Storage::DeleteColumn(const std::string& table_name, const std::string& row
     }
 }
 
+bool Storage::DeleteCell(
+    std::string const& table_name, std::string const& row_key,
+    std::string const& prefixed_cf_name, std::string const& column_name,
+    std::chrono::milliseconds const& timestamp) {
+    rocksdb::ColumnFamilyHandle* handle = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(cf_mutex_);
+        auto it = cf_handles_.find(prefixed_cf_name);
+        if (it == cf_handles_.end()) return false;
+        handle = it->second;
+    }
+
+    std::string const full_key = "/tables/" + table_name + "/" + row_key + "/" +
+                                 column_name + "/" +
+                                 std::to_string(timestamp.count());
+    auto const status = db_->Delete(rocksdb::WriteOptions(), handle, full_key);
+    if (!status.ok()) {
+        std::cerr << "DeleteCell failed for '" << prefixed_cf_name
+                  << "': " << status.ToString() << "\n";
+        return false;
+    }
+    return true;
+}
+
 void Storage::DeleteRow(const std::string& table_name, const std::string& row_key) {
     std::string start_key = "/tables/" + table_name + "/" + row_key + "/";
     std::string end_key = CalculatePrefixEnd(start_key);

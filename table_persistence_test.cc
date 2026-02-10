@@ -17,6 +17,7 @@
 #include "constants.h"
 #include "google/cloud/testing_util/status_matchers.h"
 #include <google/bigtable/admin/v2/table.pb.h>
+#include <google/bigtable/v2/bigtable.pb.h>
 #include <google/protobuf/field_mask.pb.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -205,6 +206,38 @@ TEST_F(TablePersistenceTest, RepeatedCreateDoesNotDuplicateManifestEntry) {
 
   auto const manifest = storage().GetRow(kManifestKey);
   EXPECT_EQ(1, CountManifestMatches(manifest, expected_manifest_line));
+}
+
+TEST_F(TablePersistenceTest, FailedMutateRowRollsBackPersistedSetCell) {
+  auto const table_name = MakeUniqueTableName();
+  auto const row_key = "row-rollback";
+
+  btadmin::Table schema;
+  schema.set_name(table_name);
+  (*schema.mutable_column_families())["cf1"] = btadmin::ColumnFamily{};
+
+  auto maybe_table = Table::Create(schema);
+  ASSERT_STATUS_OK(maybe_table);
+  auto table = maybe_table.value();
+
+  google::bigtable::v2::MutateRowRequest request;
+  request.set_table_name(table_name);
+  request.set_row_key(row_key);
+
+  auto* good_mutation = request.add_mutations()->mutable_set_cell();
+  good_mutation->set_family_name("cf1");
+  good_mutation->set_column_qualifier("col1");
+  good_mutation->set_timestamp_micros(1000000);
+  good_mutation->set_value("value-1");
+
+  auto* failing_mutation = request.add_mutations()->mutable_set_cell();
+  failing_mutation->set_family_name("missing_cf");
+  failing_mutation->set_column_qualifier("col2");
+  failing_mutation->set_timestamp_micros(2000000);
+  failing_mutation->set_value("value-2");
+
+  EXPECT_FALSE(table->MutateRow(request).ok());
+  EXPECT_FALSE(storage().RowExists(table_name, row_key));
 }
 
 }  // namespace
