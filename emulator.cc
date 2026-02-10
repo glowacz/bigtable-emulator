@@ -29,13 +29,22 @@ ABSL_FLAG(std::string, host, "localhost",
           "the address to bind to on the local machine");
 ABSL_FLAG(std::uint16_t, port, 8888,
           "the port to bind to on the local machine");
+ABSL_FLAG(std::string, db_path, "test_db",
+          "path to the RocksDB directory used for persistence");
 
 int main(int argc, char* argv[]) {
   namespace bt_emulator = ::google::cloud::bigtable::emulator;
 
   absl::SetProgramUsageMessage(
-      absl::StrCat("Usage: %s -h <host> -p <port>", argv[0]));
+      absl::StrCat("Usage: %s --host=<host> --port=<port> "
+                   "[--db_path=<rocksdb_dir>]",
+                   argv[0]));
   absl::ParseCommandLine(argc, argv);
+  auto const db_path = absl::GetFlag(FLAGS_db_path);
+  if (db_path.empty()) {
+    std::cerr << "DB path cannot be empty" << std::endl;
+    return 1;
+  }
 
   auto maybe_server =
       google::cloud::bigtable::emulator::CreateDefaultEmulatorServer(
@@ -46,7 +55,7 @@ int main(int argc, char* argv[]) {
               << std::endl;
     return 1;
   }
-  if (bt_emulator::InitGlobalStorage("test_db") != 0) {
+  if (bt_emulator::InitGlobalStorage(db_path.c_str()) != 0) {
     fprintf(stderr, "Failed to open DB\n");
     return 1;
   }
